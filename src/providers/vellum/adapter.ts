@@ -1,11 +1,14 @@
 /**
- * Default provider — the platform owns the line.
+ * Default provider — Vellum provides the line.
  *
- * The user turns the channel on and gets a number. There is no third-party
+ * The user turns the channel on and is reachable. There is no third-party
  * account to create and no key to paste, which is the whole reason this is the
  * default: it takes a user from "install" to "working" without leaving the
- * product. Comms is what the platform runs underneath, and the user never sees
- * that.
+ * product. Comms is what runs underneath, and the user never sees that.
+ *
+ * The line is shared for now. A dedicated line per assistant is the direction,
+ * so do not write code or copy that assumes this line belongs to exactly one
+ * assistant.
  *
  * The platform surface this talks to follows the same shape as the email
  * channel, which is the closest existing analogue: the platform provisions the
@@ -68,7 +71,7 @@ export function createVellumProvider(
           : {
               ready: false as const,
               reason:
-                "no iMessage line is provisioned for this assistant yet — enable the iMessage channel to get a number",
+                "no iMessage line is available for this assistant yet — enable the iMessage channel",
             };
       } catch (err) {
         return {

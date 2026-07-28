@@ -1,13 +1,13 @@
 # Bring your own Comms account
 
-The default setup uses the platform-provisioned line and needs none of this.
+The default setup uses the Vellum-provided line and needs none of this.
 Follow this path only when the user explicitly wants the channel running on
 their own [Comms by Osis](https://comms.osis.co) workspace.
 
-Trade-off worth stating up front: BYOK means the user owns the line, the
-billing, and the number, and it also means they own the setup, the rotation,
-and anything that breaks. The platform path is faster and has fewer moving
-parts.
+Trade-off worth stating up front: BYOK gets the user a line of their own,
+which the default Vellum path does not today — it also means they own the
+billing, the setup, the rotation, and anything that breaks. The Vellum path is
+faster and has fewer moving parts.
 
 ## 1. Create the line and mint an API key
 

@@ -4,9 +4,9 @@ An iMessage and SMS channel for the Vellum assistant.
 
 ## What it does
 
-Gives the assistant **its own phone number**. People text that number and the
-assistant answers, over iMessage where the recipient supports it and SMS
-otherwise.
+Makes the assistant reachable by text message. People text a line the
+assistant listens on, and it answers over iMessage where the recipient
+supports it and SMS otherwise.
 
 ## What it does not do
 
@@ -15,8 +15,8 @@ threads.
 
 ## Setup
 
-Enable the iMessage channel for the assistant. The platform provisions the
-line, so there is no third-party account to create and no key to paste.
+Enable the iMessage channel for the assistant. Vellum provides the line, so
+there is no third-party account to create and no key to paste.
 
 Users who want to run the channel on their own [Comms by
 Osis](https://comms.osis.co) workspace can do that instead; see

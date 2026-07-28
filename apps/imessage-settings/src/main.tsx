@@ -18,13 +18,13 @@ import { createRoot } from "react-dom/client";
 const BASE = "/x/plugins/imessage";
 
 const PROVIDER_LABELS: Record<string, string> = {
-  vellum: "Vellum-managed line",
+  vellum: "Vellum-provided line",
   comms: "Your own Comms account",
 };
 
 const PROVIDER_HINTS: Record<string, string> = {
-  vellum: "The platform provisions the number. Nothing to set up.",
-  comms: "Requires a Comms by Osis API key in the credential store.",
+  vellum: "Vellum provides the line. Nothing to set up. Shared for now.",
+  comms: "Your own line. Requires a Comms by Osis API key in the credential store.",
 };
 
 const STYLES = `
@@ -156,7 +156,7 @@ function App(): React.ReactElement {
       <style>{STYLES}</style>
       <h1>iMessage</h1>
       <p className="sub">
-        The assistant has its own number. People text it to reach the assistant.
+        People reach the assistant by texting a line it listens on.
       </p>
 
       {error ? <div className="banner err">{error}</div> : null}

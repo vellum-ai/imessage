@@ -49,6 +49,19 @@ reason the app renders. It also clears the previous provider *before* building
 the new one: a failed switch that left the old provider active would keep
 sending over a provider the config no longer names.
 
+## Outbound
+
+`src/send.ts` is the one outbound entry point, used by the `send_imessage` tool
+and by `POST /x/plugins/imessage/send`. Both go through the channel transport
+rather than calling a provider directly, so a send exercises the same path a
+real assistant reply will: markdown flattening, handle normalization, and
+idempotency-key derivation. A test path that skipped the transport would prove
+the credentials work and nothing else.
+
+Outbound works today on `comms` and not on `vellum`, which needs platform
+endpoints that do not exist yet. See
+`skills/imessage-setup/references/testing-outbound.md`.
+
 ## Ingress
 
 Webhooks are the default. **The gateway verifies delivery signatures, enforces

@@ -58,6 +58,13 @@ Optional, in the plugin's `config.json`:
 not a security control. The assistant's admission policy is the real gate, and
 it applies either way.
 
+## Testing outbound before inbound works
+
+Inbound does not reach the assistant yet on any provider, and outbound only
+works on the bring-your-own-account path. See
+[references/testing-outbound.md](references/testing-outbound.md) when the user
+wants to verify sending works.
+
 ## Bring your own account
 
 Some users want to run the channel on their own Comms by Osis workspace

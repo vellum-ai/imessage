@@ -5,25 +5,32 @@ Notes for agents (and humans) working in this repo.
 ## What this is
 
 A standalone Vellum Assistant plugin (external plugin, installed via
-`assistant plugins install`) that gives the assistant a phone number people can
-reach it on by iMessage and SMS.
+`assistant plugins install`) that makes the assistant reachable by iMessage and
+SMS.
 
-Read this before anything else: **the assistant gets its own number.** This
-plugin does not read the user's personal iMessage account, and no work in this
-repo will change that — it is a property of how the lines are provisioned. If a
-task here assumes access to `chat.db`, AppleScript, or the user's existing
-threads, the task rests on a wrong premise; say so rather than building toward
-it.
+Read this before anything else: **the assistant is reached on a line it
+listens on, not on the user's own number.** This plugin does not read the
+user's personal iMessage account, and no work in this repo will change that —
+it is a property of how the lines are provisioned. If a task here assumes
+access to `chat.db`, AppleScript, or the user's existing threads, the task
+rests on a wrong premise; say so rather than building toward it.
+
+**Do not write copy claiming the assistant has a number of its own.** On the
+default Vellum path the line is shared for now. A dedicated line per assistant
+is the direction, not the current state, and user-facing text that promises it
+today is wrong. `comms` (BYOK) is the only path that actually gets a user their
+own line.
 
 ## Providers
 
 The channel is provider-agnostic above `src/providers/types.ts`. Two providers:
 
-- **`vellum`** (default) — the platform provisions and owns the line. The user
-  turns the channel on and gets a number: no third-party account, no key. Comms
-  by Osis runs underneath, which the user never sees. Webhook-only.
-- **`comms`** — the user's own Comms by Osis workspace and API key. Supports
-  both webhook and poll ingress.
+- **`vellum`** (default) — Vellum provides the line. The user turns the channel
+  on and can be reached: no third-party account, no key. Comms by Osis runs
+  underneath, which the user never sees. Shared for now, so nothing here should
+  assume the line belongs to one assistant. Webhook-only.
+- **`comms`** — the user's own Comms by Osis workspace and API key, and their
+  own line. Supports both webhook and poll ingress.
 
 Adding a provider means adding a directory under `src/providers/` and a
 registry entry in `src/providers/index.ts`. Nothing above the seam changes. If

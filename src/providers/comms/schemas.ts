@@ -62,7 +62,7 @@ export const CommsMessageSchema = z.looseObject({
   conversationId: softString,
   /** Sender handle in E.164. */
   from: softString,
-  /** Recipient handle in E.164 — our own line, for inbound. */
+  /** Recipient handle in E.164 — the line that received it, for inbound. */
   to: softString,
   contact_id: softString,
   contactId: softString,

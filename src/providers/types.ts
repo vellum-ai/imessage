@@ -8,10 +8,11 @@
  *
  * Two providers today:
  *
- * - `vellum` (default) — the platform provisions and owns the line. The user
- *   turns the channel on and gets a number; no third-party account, no key to
- *   paste. Comms is what the platform runs underneath, which is an
- *   implementation detail the user never sees.
+ * - `vellum` (default) — Vellum provides the line. The user turns the channel
+ *   on and is reachable; no third-party account, no key to paste. Comms is what
+ *   runs underneath, which is an implementation detail the user never sees.
+ *   The line is shared for now, so nothing above this seam may assume it
+ *   belongs to a single assistant.
  * - `comms` — bring your own Comms by Osis workspace and API key.
  *
  * Adding a third provider means adding a directory and a registry entry.

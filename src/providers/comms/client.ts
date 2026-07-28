@@ -9,6 +9,7 @@
  * the docs did not fully pin down must degrade, not throw.
  */
 
+import { resolveApiKey } from "../../config.ts";
 import type {
   CommsChannel,
   CommsMessage,
@@ -66,14 +67,13 @@ export interface ListMessagesInput {
 
 export class CommsClient {
   /**
-   * `getApiKey` is injected rather than imported so the client stays free of
-   * credential policy: the BYOK adapter resolves the user's stored key, and a
-   * platform-hosted caller can supply its own token source.
+   * The API base and the key source are fixed, not injected. There is one
+   * Comms deployment and one credential this client can use, so passing either
+   * in would only create a way for a caller to be wrong. Tests exercise the
+   * client by stubbing `fetch` and the credential module.
    */
-  constructor(
-    private readonly getApiKey: () => Promise<string>,
-    private readonly baseUrl: string = COMMS_API_BASE,
-  ) {}
+  private readonly baseUrl = COMMS_API_BASE;
+  private readonly getApiKey = resolveApiKey;
 
   /**
    * `POST /messages`.

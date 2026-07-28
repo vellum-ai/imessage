@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 
-import { IMESSAGE_CHANNEL } from "./channel-id.ts";
+import { CHANNEL_ID } from "../plugin-paths.ts";
 import type {
   PluginChannelTransport,
   PluginDeliveryResult,
@@ -48,7 +48,7 @@ export function createTransport(
   provider: MessagingProvider,
 ): PluginChannelTransport {
   return {
-    channel: IMESSAGE_CHANNEL,
+    channel: CHANNEL_ID,
 
     async deliver(
       conversationExternalId: string,

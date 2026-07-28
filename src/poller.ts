@@ -1,21 +1,24 @@
 /**
- * Inbound polling loop — the default ingress mode.
+ * Inbound polling loop.
  *
- * Polls `GET /messages` on an interval, normalizes what comes back, and hands
- * each event to a sink. This is the mode built entirely on documented
- * behavior: it needs only the `comms_read` scope and no public surface, so it
- * works in deployments where nothing can reach the gateway from outside.
+ * Provider-agnostic by construction: it takes a `MessagingProvider` and only
+ * ever calls `fetchInbound`. It never sees a Comms payload, a platform
+ * payload, or any provider-shaped JSON — adapters normalize before handing a
+ * record back. Adding a provider changes nothing in this file.
  *
- * Correctness rests on `cursor.ts`: the timestamp bound alone is not enough to
+ * Polling is the fallback ingress mode. Webhooks are the default; this exists
+ * for deployments whose gateway is not reachable from the internet.
+ *
+ * Runs inside the poll worker process, not the daemon (see `src/worker/`).
+ *
+ * Correctness rests on `cursor.ts`: a timestamp bound alone is not enough to
  * avoid replaying or dropping messages at a poll boundary.
  */
 
 import type { PluginInboundEvent } from "./channel/contract.ts";
-import { normalizeCommsMessage } from "./channel/normalize.ts";
-import type { CommsClient } from "./comms/client.ts";
-import { createdAtOf, unknownMessageKeys } from "./comms/schemas.ts";
 import type { Cursor } from "./cursor.ts";
 import { advanceCursor, isSeen, readCursor, writeCursor } from "./cursor.ts";
+import type { MessagingProvider } from "./providers/types.ts";
 
 /** Messages requested per poll. */
 const PAGE_LIMIT = 100;
@@ -32,7 +35,7 @@ export interface PollerLogger {
 }
 
 export interface PollerOptions {
-  client: CommsClient;
+  provider: MessagingProvider;
   storageDir: string;
   intervalMs: number;
   logger: PollerLogger;
@@ -47,12 +50,7 @@ export interface PollerOptions {
   now?: () => Date;
 }
 
-/**
- * Long-poll loop over the Messages API.
- *
- * Started in `init`, stopped in `shutdown`. One instance per plugin load.
- */
-export class CommsPoller {
+export class Poller {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
   private inFlight = false;
@@ -74,6 +72,11 @@ export class CommsPoller {
    */
   start(): void {
     if (this.running) return;
+    if (!this.opts.provider.supportsPolling) {
+      throw new Error(
+        `provider ${this.opts.provider.id} does not support polling`,
+      );
+    }
     this.running = true;
 
     if (!this.cursor.since) {
@@ -105,29 +108,16 @@ export class CommsPoller {
     if (this.inFlight) return 0;
     this.inFlight = true;
     try {
-      const response = await this.opts.client.listMessages({
+      const records = await this.opts.provider.fetchInbound({
         since: this.cursor.since,
-        direction: "inbound",
         limit: PAGE_LIMIT,
       });
 
-      const fresh = response.messages.filter(
-        (message) => !isSeen(this.cursor, message.id),
-      );
-
       let delivered = 0;
-      for (const message of fresh) {
-        // Surface wire keys the schema does not model, so the UNVERIFIED
-        // field-name guesses in schemas.ts can be corrected against reality.
-        const unknown = unknownMessageKeys(message);
-        if (unknown.length > 0) {
-          this.opts.logger.debug(
-            { unknownKeys: unknown },
-            "imessage: Comms message carried unmodelled fields",
-          );
-        }
+      for (const record of records) {
+        if (isSeen(this.cursor, record.id)) continue;
 
-        const event = normalizeCommsMessage(message, this.now().toISOString());
+        const event = record.event;
         if (!event) continue;
 
         if (
@@ -145,16 +135,10 @@ export class CommsPoller {
         delivered++;
       }
 
-      // Advance over the whole batch, not just what was delivered: a message
+      // Advance over the whole batch, not just what was delivered: a record
       // that normalized to nothing is still processed, and leaving it behind
       // the cursor would re-fetch it on every poll forever.
-      this.cursor = advanceCursor(
-        this.cursor,
-        response.messages.map((message) => ({
-          id: message.id,
-          createdAt: createdAtOf(message),
-        })),
-      );
+      this.cursor = advanceCursor(this.cursor, records);
       writeCursor(this.opts.storageDir, this.cursor);
 
       this.consecutiveFailures = 0;
@@ -185,8 +169,8 @@ export class CommsPoller {
     }
 
     // A line that is down, rate-limited, or holding a revoked key should not
-    // be hammered at the normal cadence. The loop keeps running so it
-    // recovers on its own once the cause clears.
+    // be hammered at the normal cadence. The loop keeps running so it recovers
+    // on its own once the cause clears.
     const interval =
       this.consecutiveFailures >= FAILURES_BEFORE_BACKOFF
         ? this.opts.intervalMs * BACKOFF_MULTIPLIER

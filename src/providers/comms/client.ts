@@ -9,7 +9,6 @@
  * the docs did not fully pin down must degrade, not throw.
  */
 
-import { COMMS_API_BASE, resolveApiKey } from "../config.ts";
 import type {
   CommsChannel,
   CommsMessage,
@@ -19,6 +18,9 @@ import {
   ListMessagesResponseSchema,
   SendMessageResponseSchema,
 } from "./schemas.ts";
+
+/** Comms Messages API base. */
+export const COMMS_API_BASE = "https://osis.co/api/v1/comms";
 
 /** Retries for a 429 or a 5xx. Beyond this the caller sees the failure. */
 const MAX_RETRIES = 3;
@@ -63,9 +65,14 @@ export interface ListMessagesInput {
 }
 
 export class CommsClient {
+  /**
+   * `getApiKey` is injected rather than imported so the client stays free of
+   * credential policy: the BYOK adapter resolves the user's stored key, and a
+   * platform-hosted caller can supply its own token source.
+   */
   constructor(
+    private readonly getApiKey: () => Promise<string>,
     private readonly baseUrl: string = COMMS_API_BASE,
-    private readonly getApiKey: () => Promise<string> = resolveApiKey,
   ) {}
 
   /**

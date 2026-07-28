@@ -1,17 +1,47 @@
 import { describe, expect, test } from "bun:test";
 
-import { createTransport, flattenForPlainText, idempotencyKey, targetFor } from "../channel/transport.ts";
-import type { CommsClient, SendMessageInput } from "../comms/client.ts";
+import {
+  createTransport,
+  flattenForPlainText,
+  idempotencyKey,
+  targetFor,
+} from "../channel/transport.ts";
+import type {
+  MessagingProvider,
+  SendResult,
+  SendTarget,
+} from "../providers/types.ts";
 
-function stubClient(): { client: CommsClient; sends: SendMessageInput[] } {
-  const sends: SendMessageInput[] = [];
-  const client = {
-    async sendMessage(input: SendMessageInput) {
-      sends.push(input);
-      return { id: "msg_out", direction: "outbound" as const };
+interface RecordedSend {
+  target: SendTarget;
+  body: string;
+  idempotencyKey: string;
+}
+
+function stubProvider(send?: () => Promise<SendResult>): {
+  provider: MessagingProvider;
+  sends: RecordedSend[];
+} {
+  const sends: RecordedSend[] = [];
+  const provider: MessagingProvider = {
+    id: "comms",
+    label: "stub",
+    supportsPolling: true,
+    async checkReadiness() {
+      return { ready: true };
     },
-  } as unknown as CommsClient;
-  return { client, sends };
+    async fetchInbound() {
+      return [];
+    },
+    async send(target, body, opts) {
+      sends.push({ target, body, idempotencyKey: opts.idempotencyKey });
+      return send ? await send() : { id: "msg_out" };
+    },
+    normalizeWebhook() {
+      return undefined;
+    },
+  };
+  return { provider, sends };
 }
 
 describe("targetFor", () => {
@@ -37,6 +67,12 @@ describe("idempotencyKey", () => {
       idempotencyKey("+1555", "ho"),
     );
   });
+
+  test("the separator prevents a boundary collision", () => {
+    // With a space separator, ("a b", "c") and ("a", "b c") hash the same
+    // input, collapsing two distinct sends into one.
+    expect(idempotencyKey("a b", "c")).not.toBe(idempotencyKey("a", "b c"));
+  });
 });
 
 describe("flattenForPlainText", () => {
@@ -47,9 +83,7 @@ describe("flattenForPlainText", () => {
   });
 
   test("keeps fenced code contents without the fence", () => {
-    expect(flattenForPlainText("```ts\nconst x = 1;\n```")).toBe(
-      "const x = 1;",
-    );
+    expect(flattenForPlainText("```ts\nconst x = 1;\n```")).toBe("const x = 1;");
   });
 
   test("keeps a link tappable", () => {
@@ -87,48 +121,52 @@ describe("flattenForPlainText", () => {
 
 describe("transport.deliver", () => {
   test("sends flattened text with an idempotency key", async () => {
-    const { client, sends } = stubClient();
-    const transport = createTransport({ client });
+    const { provider, sends } = stubProvider();
+    const transport = createTransport(provider);
 
-    const result = await transport.deliver("conv_abc", {
-      text: "**hello**",
-    });
+    const result = await transport.deliver("conv_abc", { text: "**hello**" });
 
     expect(result.ok).toBe(true);
     expect(result.externalMessageId).toBe("msg_out");
     expect(sends[0]?.body).toBe("hello");
-    expect(sends[0]?.conversationId).toBe("conv_abc");
+    expect(sends[0]?.target).toEqual({ conversationId: "conv_abc" });
     expect(sends[0]?.idempotencyKey).toBeTruthy();
   });
 
-  test("forces the configured send channel when set", async () => {
-    const { client, sends } = stubClient();
-    const transport = createTransport({ client, sendChannel: "imessage" });
+  test("routes an E.164 conversation id to a recipient send", async () => {
+    const { provider, sends } = stubProvider();
+    const transport = createTransport(provider);
 
     await transport.deliver("+15551234567", { text: "hi" });
 
-    expect(sends[0]?.channel).toBe("imessage");
-    expect(sends[0]?.to).toBe("+15551234567");
+    expect(sends[0]?.target).toEqual({ to: "+15551234567" });
   });
 
   test("an empty render is a success, not a failure", async () => {
-    const { client, sends } = stubClient();
-    const transport = createTransport({ client });
+    const { provider, sends } = stubProvider();
+    const transport = createTransport(provider);
 
     expect((await transport.deliver("conv_abc", { text: "" })).ok).toBe(true);
     expect(sends).toHaveLength(0);
   });
 
   test("a send failure returns an error result rather than throwing", async () => {
-    const client = {
-      async sendMessage() {
-        throw new Error("429 rate limited");
-      },
-    } as unknown as CommsClient;
-    const transport = createTransport({ client });
+    const { provider } = stubProvider(() => {
+      throw new Error("429 rate limited");
+    });
+    const transport = createTransport(provider);
 
     const result = await transport.deliver("conv_abc", { text: "hi" });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("429");
+  });
+
+  test("is provider-agnostic", async () => {
+    // Swapping the provider changes nothing about how a reply is rendered or
+    // addressed; the transport never branches on the provider id.
+    const { provider, sends } = stubProvider();
+    const vellumish: MessagingProvider = { ...provider, id: "vellum" };
+    await createTransport(vellumish).deliver("conv_abc", { text: "hi" });
+    expect(sends[0]?.body).toBe("hi");
   });
 });

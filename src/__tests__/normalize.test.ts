@@ -4,8 +4,8 @@ import {
   chatTypeFor,
   normalizeCommsMessage,
   normalizeWebhookEvent,
-} from "../channel/normalize.ts";
-import { CommsMessageSchema } from "../comms/schemas.ts";
+} from "../providers/comms/normalize.ts";
+import { CommsMessageSchema } from "../providers/comms/schemas.ts";
 
 const RECEIVED_AT = "2026-07-28T12:00:00.000Z";
 

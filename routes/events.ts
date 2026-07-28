@@ -2,66 +2,39 @@
  * `POST /webhooks/plugins/imessage/events` — inbound message webhooks.
  *
  * Reached through the ingress declaration in `channels/ingress.json`, which a
- * guardian must approve before the gateway serves it.
+ * guardian approves before the gateway serves it.
  *
- * This route is unauthenticated ingress from the public internet, so it fails
- * closed at every step: no signing secret stored, no signature header, a stale
- * timestamp, or a digest mismatch all reject before the body is parsed as
- * anything meaningful. An inbound-message route anyone can POST to is a way to
- * impersonate a trusted contact, so "accept it and let the gateway sort it
- * out" is not an option.
- *
- * Enabled only when `ingressMode` is `"webhook"`. In the default `poll` mode
- * the route answers 404 so an approved-but-unused declaration is not a live
- * surface.
+ * The gateway authenticates the delivery before this handler runs: signature
+ * verification, body-size limits, and rate limiting are all its job, and
+ * re-implementing them here would mean two schemes to keep in sync and one to
+ * get subtly wrong. What arrives here is already-verified input, so this
+ * handler only has to decide whether the payload is a turn.
  */
 
-import { normalizeWebhookEvent } from "../src/channel/normalize.ts";
-import { verifyWebhookSignature, SIGNATURE_HEADER } from "../src/comms/signature.ts";
-import { isAllowedHandle, resolveWebhookSecret } from "../src/config.ts";
-import { getConfig } from "../src/plugin-state.ts";
-
-/**
- * Cap on the body we will read. The gateway enforces its own webhook payload
- * limit upstream; this is the plugin's own belt.
- */
-const MAX_BODY_BYTES = 128 * 1024;
+import { isAllowedHandle } from "../src/config.ts";
+import { getConfig, getProvider } from "../src/plugin-state.ts";
 
 export async function POST(request: Request): Promise<Response> {
   const config = getConfig();
-  if (!config) {
+  const provider = getProvider();
+  if (!config || !provider) {
     return json(503, { error: "plugin not initialized" });
   }
   if (config.ingressMode !== "webhook") {
+    // An approved-but-unused declaration should not be a live surface.
     return json(404, { error: "webhook ingress is not enabled" });
-  }
-
-  const rawBody = await request.text();
-  if (rawBody.length > MAX_BODY_BYTES) {
-    return json(413, { error: "payload too large" });
-  }
-
-  const verification = verifyWebhookSignature({
-    rawBody,
-    signatureHeader: request.headers.get(SIGNATURE_HEADER),
-    secret: await resolveWebhookSecret(),
-  });
-  if (!verification.ok) {
-    // The reason is deliberately not echoed to the caller — it would tell an
-    // attacker which check they failed.
-    return json(401, { error: "signature verification failed" });
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(rawBody);
+    parsed = await request.json();
   } catch {
-    // 200 rather than 400: the delivery was authentic, the body was not
-    // usable, and Comms should not retry it forever.
+    // 200 rather than 400: the delivery was authentic and retrying it will not
+    // make the body parse.
     return json(200, { ok: true, ignored: "unparsable body" });
   }
 
-  const event = normalizeWebhookEvent(parsed, new Date().toISOString());
+  const event = provider.normalizeWebhook(parsed, new Date().toISOString());
   if (!event) {
     // Delivery receipts and outbound echoes land here. Not an error.
     return json(200, { ok: true, ignored: "not an inbound message" });
@@ -72,10 +45,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // TODO(pluggable-channels): forward to the host's inbound pipeline so the
-  // event runs through the `no_one` kill switch, trust classification, and the
-  // admission floor. See the matching note in hooks/init.ts — until that entry
-  // point exists, accepting the delivery without forwarding is the only
-  // behavior that does not bypass admission.
+  // event runs through the kill switch, trust classification, and the
+  // admission floor. See the matching note in hooks/init.ts.
   return json(200, { ok: true });
 }
 

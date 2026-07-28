@@ -1,24 +1,22 @@
 /**
- * Plugin configuration — schema, defaults, and resolution.
+ * Plugin configuration — schema, defaults, and credential resolution.
  *
  * The host hands the plugin its parsed config as `InitContext.config` (an
  * `unknown`). This module owns the single Zod schema that validates it.
  *
  * The Comms API key is deliberately not a config field, and the credential's
- * name is not configurable: the plugin always resolves it from a single fixed
- * credential (`imessage:api_key`) so the secret lives in the credential store
- * rather than as plaintext in `config.json`. The `imessage-setup` skill guides
- * the user through storing it.
+ * name is not configurable: the BYOK provider always resolves it from a single
+ * fixed credential so the secret lives in the credential store rather than as
+ * plaintext in `config.json`.
  */
 
 import { resolveCredential } from "@vellumai/plugin-api";
 import { z } from "zod";
 
-/** Comms Messages API base. */
-export const COMMS_API_BASE = "https://osis.co/api/v1/comms";
+import { PROVIDER_IDS } from "./providers/types.ts";
 
 /**
- * Fixed credentials the plugin reads its secrets from.
+ * Fixed credential the BYOK provider reads its key from.
  *
  * `resolveCredential` takes a `"service/field"` ref; the colon form
  * (`imessage:api_key`) is the human-facing name used by the `assistant
@@ -27,18 +25,20 @@ export const COMMS_API_BASE = "https://osis.co/api/v1/comms";
  */
 export const CREDENTIAL_SERVICE = "imessage";
 export const API_KEY_FIELD = "api_key";
-export const WEBHOOK_SECRET_FIELD = "webhook_secret";
 
 /**
  * How inbound messages reach the plugin.
  *
- * `poll` is the default because it is the only mode built entirely on
- * documented behavior: `GET /messages` with a `since` bound, needing just the
- * `comms_read` scope and no public surface. The webhook mode is faster but its
- * payload envelope and signature scheme are not in the published docs, so it
- * stays opt-in until verified against a real delivery.
+ * `webhook` is the default: the provider pushes, so a message becomes a turn
+ * within a second rather than within a poll interval, and nothing burns
+ * requests while a line is quiet. Signature verification belongs to the
+ * gateway, so the route only ever sees deliveries the gateway already
+ * authenticated.
+ *
+ * `poll` exists for BYOK deployments whose gateway is not reachable from the
+ * internet. It only works on providers that support it.
  */
-export const INGRESS_MODES = ["poll", "webhook"] as const;
+export const INGRESS_MODES = ["webhook", "poll"] as const;
 export type IngressMode = (typeof INGRESS_MODES)[number];
 
 /** Bounds on the poll interval. Comms rate-limits with 429. */
@@ -46,11 +46,17 @@ const MIN_POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_INTERVAL_MS = 300_000;
 
 export const IMessageConfigSchema = z.object({
+  provider: z
+    .enum(PROVIDER_IDS)
+    .default("vellum")
+    .describe(
+      "Who owns the line: 'vellum' (the platform provisions it, default) or 'comms' (your own Comms by Osis account).",
+    ),
   ingressMode: z
     .enum(INGRESS_MODES)
-    .default("poll")
+    .default("webhook")
     .describe(
-      "How inbound messages arrive: 'poll' the Messages API (default), or receive 'webhook' deliveries.",
+      "How inbound messages arrive: 'webhook' (default) or 'poll' for deployments with no public ingress.",
     ),
   pollIntervalMs: z
     .number()
@@ -58,21 +64,21 @@ export const IMessageConfigSchema = z.object({
     .min(MIN_POLL_INTERVAL_MS)
     .max(MAX_POLL_INTERVAL_MS)
     .default(5_000)
-    .describe("Delay between polls of the Messages API, in milliseconds."),
+    .describe("Delay between polls, in milliseconds. Only used in poll mode."),
   /**
-   * Preferred send channel. `undefined` lets Comms choose, which is the
-   * documented default and the right answer for most lines: it uses iMessage
-   * where the handle supports it and falls back to SMS.
+   * Preferred send channel for the BYOK provider. `undefined` lets Comms
+   * choose, which is the documented default and right for most lines: it uses
+   * iMessage where the handle supports it and falls back to SMS.
    */
   sendChannel: z
     .enum(["sms", "imessage"])
     .optional()
     .describe(
-      "Force a delivery channel for outbound messages. Omit to let Comms choose.",
+      "Force a delivery channel for outbound messages. Omit to let the provider choose.",
     ),
   /**
    * Handles allowed to reach the assistant. Empty means no plugin-side filter
-   * — the gateway's admission floor is still the real gate, this is a coarse
+   * — the gateway's admission floor is the real gate, this is a coarse
    * pre-filter for a line that is also used for something else.
    */
   allowedHandles: z
@@ -93,8 +99,8 @@ export interface ResolvedConfig {
 /**
  * Validate the host-supplied config.
  *
- * Unknown keys are dropped with a warning rather than rejected, so a config
- * written for a newer version of the plugin still boots.
+ * Invalid values fall back to defaults with a warning rather than throwing: a
+ * bad interval should not stop the channel from loading.
  */
 export function resolveConfig(raw: unknown): ResolvedConfig {
   const warnings: string[] = [];
@@ -104,16 +110,8 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
     for (const issue of parsed.error.issues) {
       warnings.push(`${issue.path.join(".") || "(root)"}: ${issue.message}`);
     }
-    // Fall back to defaults rather than throwing: a bad interval should not
-    // stop the channel from loading.
     warnings.push("falling back to default configuration");
     return { config: IMessageConfigSchema.parse({}), warnings };
-  }
-
-  if (parsed.data.ingressMode === "webhook") {
-    warnings.push(
-      "ingressMode 'webhook' is unverified: the Comms webhook envelope and signature scheme are not in the published docs. Confirm against a real delivery before relying on it.",
-    );
   }
 
   return { config: parsed.data, warnings };
@@ -122,12 +120,12 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
 /**
  * Read the Comms API key from the credential store.
  *
- * Resolved at call time rather than cached at init so a rotated key takes
- * effect without a daemon restart.
+ * Resolved at call time rather than at load, so a rotated key takes effect
+ * without a daemon restart and an unconfigured BYOK line fails only when it is
+ * actually used.
  *
  * `resolveCredential` throws when the reference does not resolve; that is
- * rewritten here into an error naming the command that fixes it, because the
- * common case is a user who has installed the plugin but not run setup yet.
+ * rewritten here into an error naming the command that fixes it.
  */
 export async function resolveApiKey(): Promise<string> {
   try {
@@ -142,25 +140,6 @@ export async function resolveApiKey(): Promise<string> {
     `Comms API key not found. The credential "${CREDENTIAL_SERVICE}:${API_KEY_FIELD}" must be stored in the credential store. ` +
       `Run: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${API_KEY_FIELD} <your_key>`,
   );
-}
-
-/**
- * Read the webhook signing secret, or `undefined` when none is stored.
- *
- * Absence is a normal state, not an error — the default poll mode never needs
- * one. Returning `undefined` rather than throwing is what lets the webhook
- * route answer a clean 401 instead of a 500.
- */
-export async function resolveWebhookSecret(): Promise<string | undefined> {
-  try {
-    return (
-      (await resolveCredential(
-        `${CREDENTIAL_SERVICE}/${WEBHOOK_SECRET_FIELD}`,
-      )) || undefined
-    );
-  } catch {
-    return undefined;
-  }
 }
 
 /**

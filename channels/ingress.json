@@ -1,0 +1,9 @@
+{
+  "routes": [
+    {
+      "path": "events",
+      "kind": "http",
+      "description": "Inbound message webhooks from the Comms by Osis line (message.received). Signature-verified; rejects every delivery when no signing secret is stored."
+    }
+  ]
+}

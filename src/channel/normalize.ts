@@ -1,0 +1,115 @@
+/**
+ * Comms payload to `PluginInboundEvent`.
+ *
+ * The one job here is to turn untrusted provider JSON into the shape the
+ * gateway's admission pipeline consumes, dropping anything that must not
+ * become a turn. Every drop is silent and returns `undefined`: a delivery
+ * receipt is not an error.
+ *
+ * Nothing in this module decides whether a message is *allowed*. Trust
+ * classification and the admission floor live in the gateway and stay there;
+ * this module's contribution to that decision is getting `actorExternalId`
+ * right and stamping the SMS/iMessage distinction so the gateway can act on
+ * it.
+ */
+
+import type { PluginInboundEvent } from "./contract.ts";
+import { resolveIdentity } from "./identity.ts";
+import type { CommsMessage } from "../comms/schemas.ts";
+import {
+  CommsMessageSchema,
+  conversationIdOf,
+  isInboundMessageEvent,
+  messageFromWebhookEvent,
+  WebhookEventSchema,
+} from "../comms/schemas.ts";
+
+/** Registered channel id. Must match what the host registers. */
+export const IMESSAGE_CHANNEL = "imessage";
+
+/**
+ * Chat type stamped on the event.
+ *
+ * Not cosmetic. SMS sender IDs are spoofable in a way iMessage identities are
+ * not, so the gateway needs the distinction to classify a green bubble more
+ * harshly than a blue one. An absent `channel` field reads as `sms`, the more
+ * conservative of the two — a missing signal must not buy the sender the
+ * stronger identity.
+ */
+export function chatTypeFor(message: CommsMessage): "imessage" | "sms" {
+  return message.channel === "imessage" ? "imessage" : "sms";
+}
+
+/**
+ * Normalize one Comms message.
+ *
+ * Returns `undefined` when the message must not become a turn:
+ *   - it is outbound (our own reply echoed back)
+ *   - it has no attributable sender (cannot be trust-classified)
+ *   - it has no text content (a receipt, or an attachment-only message,
+ *     which v1 does not carry)
+ *
+ * `receivedAt` is supplied by the caller so the host's wall clock is the
+ * source of truth, never `created_at` off the wire.
+ */
+export function normalizeCommsMessage(
+  raw: unknown,
+  receivedAt: string,
+): PluginInboundEvent | undefined {
+  const parsed = CommsMessageSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  const message = parsed.data;
+
+  if (message.direction !== "inbound") return undefined;
+
+  const identity = resolveIdentity({
+    from: message.from,
+    conversationId: conversationIdOf(message),
+  });
+  if (!identity) return undefined;
+
+  const content = message.body?.trim();
+  if (!content) return undefined;
+
+  return {
+    version: "v1",
+    sourceChannel: IMESSAGE_CHANNEL,
+    receivedAt,
+    message: {
+      content,
+      conversationExternalId: identity.conversationExternalId,
+      externalMessageId: message.id,
+    },
+    actor: {
+      actorExternalId: identity.actorExternalId,
+    },
+    source: {
+      updateId: message.id,
+      messageId: message.id,
+      chatType: chatTypeFor(message),
+    },
+    // Verbatim, per the gateway's ingress rule: only the parsed working copy
+    // is schema-shaped.
+    raw: (raw ?? {}) as Record<string, unknown>,
+  };
+}
+
+/**
+ * Normalize a webhook delivery.
+ *
+ * Accepts both envelope shapes Comms might use and drops anything that is not
+ * an inbound message event before unwrapping.
+ */
+export function normalizeWebhookEvent(
+  raw: unknown,
+  receivedAt: string,
+): PluginInboundEvent | undefined {
+  const parsed = WebhookEventSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  if (!isInboundMessageEvent(parsed.data)) return undefined;
+
+  const message = messageFromWebhookEvent(parsed.data);
+  if (!message) return undefined;
+
+  return normalizeCommsMessage(message, receivedAt);
+}

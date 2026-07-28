@@ -1,0 +1,25 @@
+{
+  "name": "@vellumai/imessage",
+  "version": "0.0.1",
+  "private": true,
+  "description": "iMessage and SMS channel for the Vellum assistant, backed by a Comms by Osis line.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "imessage",
+    "sms",
+    "channel",
+    "comms",
+    "osis"
+  ],
+  "peerDependencies": {
+    "@vellumai/plugin-api": "^0.10.3"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.9",
+    "typescript": "5.9.3"
+  }
+}

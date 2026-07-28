@@ -5,53 +5,43 @@ Notes for agents (and humans) working in this repo.
 ## What this is
 
 A standalone Vellum Assistant plugin (external plugin, installed via
-`assistant plugins install`) that makes the assistant reachable by iMessage and
-SMS through a **Comms by Osis** line.
+`assistant plugins install`) that gives the assistant a phone number people can
+reach it on by iMessage and SMS.
 
-Read this before anything else: **Comms gives the assistant its own phone
-number.** It is a hosted line with a REST API, not a bridge to a Mac. This
-plugin cannot read the user's personal iMessage account, and no amount of work
-in this repo will change that — it is a property of the provider. If a task
-here assumes access to `chat.db`, AppleScript, or the user's existing threads,
-the task is based on a wrong premise; say so rather than building toward it.
+Read this before anything else: **the assistant gets its own number.** This
+plugin does not read the user's personal iMessage account, and no work in this
+repo will change that — it is a property of how the lines are provisioned. If a
+task here assumes access to `chat.db`, AppleScript, or the user's existing
+threads, the task rests on a wrong premise; say so rather than building toward
+it.
 
-## Layout (discovery is by convention)
+## Providers
 
-```
-hooks/init.ts          resolve config, build the client, start the poller
-hooks/shutdown.ts      stop the poller
-channels/ingress.json  declares the webhook route (guardian-approved before it is served)
-routes/events.ts       webhook receiver, used only in `ingressMode: "webhook"`
-skills/imessage-setup/ guides the user through provisioning a line and storing the key
-src/channel/           the channel: contract, identity, normalize, transport, provider
-src/comms/             the Comms API: client, schemas, signature verification
-src/config.ts          config schema and credential resolution
-src/cursor.ts          durable poll cursor
-src/poller.ts          the inbound polling loop
-```
+The channel is provider-agnostic above `src/providers/types.ts`. Two providers:
 
-There is no `register.ts` and no host stub: the plugin talks to the host only
-through `@vellumai/plugin-api`. Do not reach into `assistant/src/…`.
+- **`vellum`** (default) — the platform provisions and owns the line. The user
+  turns the channel on and gets a number: no third-party account, no key. Comms
+  by Osis runs underneath, which the user never sees. Webhook-only.
+- **`comms`** — the user's own Comms by Osis workspace and API key. Supports
+  both webhook and poll ingress.
 
-## Two unfinished seams
+Adding a provider means adding a directory under `src/providers/` and a
+registry entry in `src/providers/index.ts`. Nothing above the seam changes. If
+a change outside `src/providers/` needs to know which provider is active,
+that is the signal the seam is in the wrong place — fix the seam.
 
-Both are marked `TODO(pluggable-channels)` in the source. Neither is an
-oversight.
+## Ingress
 
-**1. Nothing is forwarded to the host yet.** `hooks/init.ts` and
-`routes/events.ts` normalize inbound messages and then log them. They do not
-post into a conversation, because the only available way to do that from a
-plugin (`UserRouteContext` conversation posting) bypasses the gateway's
-`no_one` kill switch, trust classification, and admission floor. A channel that
-strangers can text into must not open that hole. When the host's
-channel-provider contract lands in `vellum-assistant`, wire the sink to it.
+Webhooks are the default. **The gateway verifies delivery signatures, enforces
+body limits, and rate-limits before the route handler runs** — the plugin does
+not re-implement any of that. Two verification schemes would be two things to
+keep in sync and one to get subtly wrong.
 
-**2. `src/channel/contract.ts` is a placeholder.** It declares the shapes the
-host will eventually export from `@vellumai/plugin-api`, mirroring
-`gateway/src/channels/inbound-event.ts` and
-`assistant/src/messaging/providers/channel-transport.ts`. When the real
-contract ships, delete the file and re-point the imports. It is the complete
-list of assumptions to reconcile.
+Polling exists for deployments whose gateway is not reachable from the
+internet. It runs in **its own worker process** (`src/worker/`), not the
+daemon: a busy line or a slow provider must not compete with the assistant's
+event loop, and a crash in the loop must not take the daemon down. The
+supervisor restarts it with backoff.
 
 ## Comms API facts worth not re-deriving
 
@@ -60,19 +50,18 @@ Base `https://osis.co/api/v1/comms`, bearer auth, scopes `comms_send` /
 
 - `POST /messages` — `{ to | conversation_id, body, channel?, idempotency_key? }`.
   202 on send, **200 with `duplicate: true`** when an idempotency key collides.
-  Always send a key: a retried send after a timeout delivers twice, and the
-  recipient sees both.
+  Always send a key: a retried send after a timeout delivers twice, and on a
+  real phone line the recipient sees both.
 - `GET /messages` — `conversation_id`, `since` (ISO-8601), `direction`, `limit`.
 - `POST /webhooks` — `{ url, events }`; events include `message.received` and
   `message.sent`.
 
-**What the docs do not say**, and what the code therefore guesses: the full
-message object beyond `{ id, body, direction }`, the webhook payload envelope,
-and the webhook signature scheme. Every guess is marked `UNVERIFIED` in
-`src/comms/schemas.ts` and `src/comms/signature.ts`, is optional, and degrades
-rather than dropping a message. `unknownMessageKeys()` logs wire keys the
-schema does not model, so a real payload corrects the guesses cheaply. Fix
-those two files before trusting webhook mode.
+The published docs specify the message object only as `{ id, body, direction }`
+and do not document the webhook envelope. Fields beyond those three are marked
+`UNVERIFIED` in `src/providers/comms/schemas.ts`, are optional so a wrong guess
+degrades rather than drops a message, and accept several plausible spellings.
+`unknownMessageKeys()` logs wire keys the schema does not model, so one real
+payload corrects the guesses.
 
 ## Conventions
 
@@ -85,6 +74,9 @@ those two files before trusting webhook mode.
   resolve. `resolveCredential` **throws** on a missing credential; it does not
   return empty.
 - `ShutdownContext` carries no logger. Only `InitContext` does.
+- **No raw control bytes in source.** One NUL makes git classify the file as
+  binary and the diff disappears from review entirely. Write control characters
+  as escapes. `src/__tests__/source-hygiene.test.ts` enforces this.
 
 ## Invariants worth keeping
 
@@ -105,8 +97,11 @@ those two files before trusting webhook mode.
   whole-second and the docs do not say whether the bound is inclusive.
   Inclusive with no id set replays the boundary message forever; exclusive with
   no id set loses a second message in the same second. See `src/cursor.ts`.
-- **Webhook mode with no stored secret rejects everything.** Failing closed is
-  the point.
+- **The poller advances past records it did not deliver.** A record that is not
+  a turn still moves the cursor, or it is re-fetched on every poll forever.
+- **Nothing resolves credentials at init.** The provider resolves what it needs
+  at call time, so an unconfigured line costs nothing at boot and a rotated key
+  takes effect without a restart.
 
 ## Checks
 

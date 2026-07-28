@@ -13,19 +13,17 @@
  * it.
  */
 
-import type { PluginInboundEvent } from "./contract.ts";
-import { resolveIdentity } from "./identity.ts";
-import type { CommsMessage } from "../comms/schemas.ts";
+import type { CommsMessage } from "./schemas.ts";
 import {
   CommsMessageSchema,
   conversationIdOf,
   isInboundMessageEvent,
   messageFromWebhookEvent,
   WebhookEventSchema,
-} from "../comms/schemas.ts";
-
-/** Registered channel id. Must match what the host registers. */
-export const IMESSAGE_CHANNEL = "imessage";
+} from "./schemas.ts";
+import { IMESSAGE_CHANNEL } from "../../channel/channel-id.ts";
+import type { PluginInboundEvent } from "../../channel/contract.ts";
+import { resolveIdentity } from "../../channel/identity.ts";
 
 /**
  * Chat type stamped on the event.

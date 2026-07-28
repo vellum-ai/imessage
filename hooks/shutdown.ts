@@ -1,10 +1,10 @@
 /**
- * `shutdown` hook — stop the poller and release in-process state.
+ * `shutdown` hook — stop the poll worker and release in-process state.
  *
  * Runs on daemon teardown, uninstall, disable, and in-place reload. Stopping
- * the poller matters most in the reload case: `shutdown` fires before the new
- * version's `init`, so leaving the old timer running would mean two pollers
- * competing over one cursor file.
+ * the supervisor matters most in the reload case: `shutdown` fires before the
+ * new version's `init`, so leaving the old worker running would mean two
+ * processes competing over one cursor file.
  *
  * `ShutdownContext` carries no logger, so this hook is deliberately silent.
  *
@@ -15,10 +15,10 @@
 
 import type { ShutdownContext } from "@vellumai/plugin-api";
 
-import { getPoller, resetPluginState } from "../src/plugin-state.ts";
+import { getSupervisor, resetPluginState } from "../src/plugin-state.ts";
 
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
-  getPoller()?.stop();
+  getSupervisor()?.stop();
   resetPluginState();
 };
 

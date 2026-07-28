@@ -30,6 +30,18 @@ registry entry in `src/providers/index.ts`. Nothing above the seam changes. If
 a change outside `src/providers/` needs to know which provider is active,
 that is the signal the seam is in the wrong place — fix the seam.
 
+The provider is switchable at runtime from the settings app
+(`apps/imessage-settings/`), which POSTs to `routes/provider.ts`. That path and
+plugin boot both go through `startChannelRuntime` in `src/channel-runtime.ts`
+— deliberately, so a switch cannot drift from a fresh boot and show up as "it
+works after a restart".
+
+`startChannelRuntime` never throws. A provider that cannot be built, or an
+ingress mode the provider does not support, leaves the channel idle with a
+reason the app renders. It also clears the previous provider *before* building
+the new one: a failed switch that left the old provider active would keep
+sending over a provider the config no longer names.
+
 ## Ingress
 
 Webhooks are the default. **The gateway verifies delivery signatures, enforces
@@ -77,6 +89,15 @@ payload corrects the guesses.
 - **No raw control bytes in source.** One NUL makes git classify the file as
   binary and the diff disappears from review entirely. Write control characters
   as escapes. `src/__tests__/source-hygiene.test.ts` enforces this.
+- **The channel id is derived, not declared.** `CHANNEL_ID` in
+  `src/plugin-paths.ts` is the plugin's directory name, because the host
+  already serves this plugin at `/x/plugins/<name>/` and
+  `/webhooks/plugins/<name>/`. A separate hardcoded id could only agree with
+  the directory name or be a bug.
+- **`CommsClient` takes no constructor arguments.** There is one Comms
+  deployment and one credential it can use, so injecting either would only
+  create a way for a caller to be wrong. Tests stub `fetch` and mock
+  `resolveCredential` at the module level.
 
 ## Invariants worth keeping
 

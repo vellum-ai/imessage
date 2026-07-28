@@ -21,7 +21,7 @@ import {
   messageFromWebhookEvent,
   WebhookEventSchema,
 } from "./schemas.ts";
-import { IMESSAGE_CHANNEL } from "../../channel/channel-id.ts";
+import { CHANNEL_ID } from "../../plugin-paths.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveIdentity } from "../../channel/identity.ts";
 
@@ -71,7 +71,7 @@ export function normalizeCommsMessage(
 
   return {
     version: "v1",
-    sourceChannel: IMESSAGE_CHANNEL,
+    sourceChannel: CHANNEL_ID,
     receivedAt,
     message: {
       content,

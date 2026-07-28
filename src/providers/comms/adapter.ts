@@ -17,21 +17,18 @@ import type {
   SendTarget,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
+import { resolveApiKey } from "../../config.ts";
 import type { CommsChannel } from "./schemas.ts";
 
 export interface CommsAdapterOptions {
-  /** Resolves the user's stored Comms API key. */
-  getApiKey: () => Promise<string>;
   /** Forced delivery channel, or `undefined` to let Comms choose. */
   sendChannel?: CommsChannel;
-  /** Injectable for tests. */
-  client?: CommsClient;
 }
 
 export function createCommsProvider(
-  opts: CommsAdapterOptions,
+  opts: CommsAdapterOptions = {},
 ): MessagingProvider {
-  const client = opts.client ?? new CommsClient(opts.getApiKey);
+  const client = new CommsClient();
 
   return {
     id: "comms",
@@ -40,7 +37,7 @@ export function createCommsProvider(
 
     async checkReadiness() {
       try {
-        await opts.getApiKey();
+        await resolveApiKey();
         return { ready: true as const };
       } catch (err) {
         return {

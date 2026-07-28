@@ -10,7 +10,6 @@ import type { MessagingProvider } from "./types.ts";
 import { createVellumProvider } from "./vellum/adapter.ts";
 import type { PlatformFetch } from "./vellum/endpoints.ts";
 import type { IMessageConfig } from "../config.ts";
-import { resolveApiKey } from "../config.ts";
 
 export interface ResolveProviderOptions {
   config: IMessageConfig;
@@ -23,10 +22,7 @@ export function resolveProvider(
 ): MessagingProvider {
   switch (opts.config.provider) {
     case "comms":
-      return createCommsProvider({
-        getApiKey: resolveApiKey,
-        sendChannel: opts.config.sendChannel,
-      });
+      return createCommsProvider({ sendChannel: opts.config.sendChannel });
     case "vellum": {
       if (!opts.platformFetch) {
         throw new Error(

@@ -28,19 +28,19 @@ afterEach(() => {
 describe("readConfigView", () => {
   test("a missing config reads as all-defaults", () => {
     const view = readConfigView(configPath);
-    expect(view.provider).toBe("vellum");
+    expect(view.provider).toBe("comms");
     expect(view.ingressMode).toBe("webhook");
   });
 
   test("an unparsable config degrades to defaults", () => {
     // A hand-edited config with a trailing comma should not brick the app.
     writeFileSync(configPath, "{ not json", "utf-8");
-    expect(readConfigView(configPath).provider).toBe("vellum");
+    expect(readConfigView(configPath).provider).toBe("comms");
   });
 
   test("a non-object config degrades to defaults", () => {
     writeFileSync(configPath, "[1,2,3]", "utf-8");
-    expect(readConfigView(configPath).provider).toBe("vellum");
+    expect(readConfigView(configPath).provider).toBe("comms");
   });
 
   test("reads stored values", () => {
@@ -118,10 +118,10 @@ describe("ConfigUpdateSchema", () => {
 });
 
 describe("applyProviderChange", () => {
-  test("persists the new provider and keeps other fields", () => {
+  test("persists the provider and keeps other fields", () => {
     writeFileSync(
       configPath,
-      JSON.stringify({ provider: "vellum", allowedHandles: ["+1555"] }),
+      JSON.stringify({ allowedHandles: ["+1555"] }),
       "utf-8",
     );
 

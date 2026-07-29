@@ -15,52 +15,64 @@ it is a property of how the lines are provisioned. If a task here assumes
 access to `chat.db`, AppleScript, or the user's existing threads, the task
 rests on a wrong premise; say so rather than building toward it.
 
-**Do not write copy claiming the assistant has a number of its own.** On the
-default Vellum path the line is shared for now. A dedicated line per assistant
-is the direction, not the current state, and user-facing text that promises it
-today is wrong. `comms` (BYOK) is the only path that actually gets a user their
-own line.
+**Bring-your-own is the whole product.** There is no Vellum-provided line and
+no bundled option: dedicated iMessage lines run about $250/line/month from the
+vendors that sell them, and a shared line cannot promise anyone a stable
+number. The user creates their own Comms account and owns the billing.
 
 ## Providers
 
-The channel is provider-agnostic above `src/providers/types.ts`. Two providers:
+The channel is provider-agnostic above `src/providers/types.ts`. One provider:
 
-- **`vellum`** (default) — Vellum provides the line. The user turns the channel
-  on and can be reached: no third-party account, no key. Comms by Osis runs
-  underneath, which the user never sees. Shared for now, so nothing here should
-  assume the line belongs to one assistant. Webhook-only.
-- **`comms`** — the user's own Comms by Osis workspace and API key, and their
-  own line. Supports both webhook and poll ingress.
+- **`comms`** — the user's own Comms by Osis workspace, API key, and line.
+  Supports both webhook and poll ingress.
+
+The seam stays despite having one implementation, and that is deliberate. No
+official iMessage API exists; every vendor that sells lines runs a macOS fleet
+under an arrangement Apple tolerates rather than licenses, and at least one
+competitor has been permanently banned mid-product. A vendor getting cut off
+should be an adapter swap, not a rewrite.
 
 Adding a provider means adding a directory under `src/providers/` and a
 registry entry in `src/providers/index.ts`. Nothing above the seam changes. If
 a change outside `src/providers/` needs to know which provider is active,
 that is the signal the seam is in the wrong place — fix the seam.
 
-The provider is switchable at runtime from the settings app
-(`apps/imessage-settings/`), which POSTs to `routes/provider.ts`. That path and
-plugin boot both go through `startChannelRuntime` in `src/channel-runtime.ts`
-— deliberately, so a switch cannot drift from a fresh boot and show up as "it
-works after a restart".
+The settings app (`apps/imessage-settings/`) POSTs to `routes/provider.ts` to
+(re)start the channel. With one provider that is effectively a restart button,
+which is still useful: it recovers a wedged poll worker without bouncing the
+daemon. That path and plugin boot both go through `startChannelRuntime` in
+`src/channel-runtime.ts` — deliberately, so the two cannot drift and show up as
+"it works after a restart".
 
 `startChannelRuntime` never throws. A provider that cannot be built, or an
 ingress mode the provider does not support, leaves the channel idle with a
 reason the app renders. It also clears the previous provider *before* building
-the new one: a failed switch that left the old provider active would keep
-sending over a provider the config no longer names.
+the new one, so a failed switch cannot leave the old provider sending under a
+config that no longer names it. That guard is currently unreachable — one
+provider, and it always builds — so it is untested; a second provider makes it
+live again.
 
 ## Outbound
 
-`src/send.ts` is the one outbound entry point, used by the `send_imessage` tool
-and by `POST /x/plugins/imessage/send`. Both go through the channel transport
-rather than calling a provider directly, so a send exercises the same path a
-real assistant reply will: markdown flattening, handle normalization, and
-idempotency-key derivation. A test path that skipped the transport would prove
-the credentials work and nothing else.
+Two callers, one set of rules.
 
-Outbound works today on `comms` and not on `vellum`, which needs platform
-endpoints that do not exist yet. See
-`skills/imessage-setup/references/testing-outbound.md`.
+- **The `imessage` skill** (`skills/imessage/`) is how the assistant sends
+  deliberately. `scripts/send.ts` runs as a standalone bun process, so it
+  resolves the API key via `assistant credentials reveal` rather than the
+  in-process credential API.
+- **The channel transport** (`src/channel/transport.ts`) is how a reply goes
+  back out once the host's inbound pipeline exists.
+
+Both import `src/channel/render.ts`, which is dependency-free for exactly that
+reason: a skill-script send and a channel reply must format identically, and two
+copies of the rules would drift.
+
+**Long replies are chunked, never truncated.** An earlier version cut at the
+limit and appended an ellipsis, which silently dropped the end of every long
+answer. Each chunk carries its own idempotency key including its **index** — a
+long reply can legitimately repeat itself, and keying on the body alone had the
+provider collapse the duplicate chunk and drop it.
 
 ## Ingress
 

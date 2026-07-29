@@ -18,13 +18,12 @@ import { createRoot } from "react-dom/client";
 const BASE = "/x/plugins/imessage";
 
 const PROVIDER_LABELS: Record<string, string> = {
-  vellum: "Vellum-provided line",
-  comms: "Your own Comms account",
+  comms: "Comms by Osis",
 };
 
 const PROVIDER_HINTS: Record<string, string> = {
-  vellum: "Vellum provides the line. Nothing to set up. Shared for now.",
-  comms: "Your own line. Requires a Comms by Osis API key in the credential store.",
+  comms:
+    "Your own account and line. Requires a Comms API key in the credential store.",
 };
 
 const STYLES = `
@@ -166,6 +165,9 @@ function App(): React.ReactElement {
         </div>
       ) : null}
 
+      {/* One provider today, so this reads as status plus a restart button.
+          Posting the active provider bounces its ingress, which is a useful way
+          to recover a wedged poll worker without restarting the daemon. */}
       <h2>Provider</h2>
       <div className="providers">
         {settings.providers.map((id) => (

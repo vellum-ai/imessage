@@ -5,8 +5,8 @@
  * `unknown`). This module owns the single Zod schema that validates it.
  *
  * The Comms API key is deliberately not a config field, and the credential's
- * name is not configurable: the BYOK provider always resolves it from a single
- * fixed credential so the secret lives in the credential store rather than as
+ * name is not configurable: the provider always resolves it from a single fixed
+ * credential so the secret lives in the credential store rather than as
  * plaintext in `config.json`.
  */
 
@@ -16,7 +16,7 @@ import { z } from "zod";
 import { PROVIDER_IDS } from "./providers/types.ts";
 
 /**
- * Fixed credential the BYOK provider reads its key from.
+ * Fixed credential the provider reads its key from.
  *
  * `resolveCredential` takes a `"service/field"` ref; the colon form
  * (`imessage:api_key`) is the human-facing name used by the `assistant
@@ -35,7 +35,7 @@ export const API_KEY_FIELD = "api_key";
  * gateway, so the route only ever sees deliveries the gateway already
  * authenticated.
  *
- * `poll` exists for BYOK deployments whose gateway is not reachable from the
+ * `poll` exists for deployments whose gateway is not reachable from the
  * internet. It only works on providers that support it.
  */
 export const INGRESS_MODES = ["webhook", "poll"] as const;
@@ -48,9 +48,9 @@ const MAX_POLL_INTERVAL_MS = 300_000;
 export const IMessageConfigSchema = z.object({
   provider: z
     .enum(PROVIDER_IDS)
-    .default("vellum")
+    .default("comms")
     .describe(
-      "Who owns the line: 'vellum' (the platform provisions it, default) or 'comms' (your own Comms by Osis account).",
+      "Which provider backs the line: 'comms' (your own Comms by Osis account, the default and only working option) or 'vellum' (platform-provided, not yet available).",
     ),
   ingressMode: z
     .enum(INGRESS_MODES)
@@ -66,7 +66,7 @@ export const IMessageConfigSchema = z.object({
     .default(5_000)
     .describe("Delay between polls, in milliseconds. Only used in poll mode."),
   /**
-   * Preferred send channel for the BYOK provider. `undefined` lets Comms
+   * Preferred send channel. `undefined` lets Comms
    * choose, which is the documented default and right for most lines: it uses
    * iMessage where the handle supports it and falls back to SMS.
    */
@@ -121,7 +121,7 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
  * Read the Comms API key from the credential store.
  *
  * Resolved at call time rather than at load, so a rotated key takes effect
- * without a daemon restart and an unconfigured BYOK line fails only when it is
+ * without a daemon restart and an unconfigured line fails only when it is
  * actually used.
  *
  * `resolveCredential` throws when the reference does not resolve; that is

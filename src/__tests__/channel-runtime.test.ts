@@ -1,10 +1,13 @@
 /**
  * Runtime tests.
  *
- * The point of `channel-runtime.ts` is that a provider switch from the
- * settings app runs the same code as a fresh boot. These pin the parts of that
- * which are easy to break: idle reasons instead of throws, and ingress being
- * torn down before it is rebuilt.
+ * The point of `channel-runtime.ts` is that a restart from the settings app
+ * runs the same code as a fresh boot. These pin the parts of that which are
+ * easy to break: reporting idle instead of throwing, and clearing the previous
+ * provider before building a replacement.
+ *
+ * `vellum` is the unbuildable provider these use as a fixture — nothing injects
+ * a platform caller yet — which is what makes the failure paths reachable.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -53,72 +56,68 @@ function withContext(): void {
 describe("startChannelRuntime", () => {
   test("without an init context it reports idle rather than throwing", () => {
     const config = IMessageConfigSchema.parse({});
-    expect(startChannelRuntime(config).idleReason).toContain(
-      "not initialized",
+    expect(startChannelRuntime(config).idleReason).toContain("not initialized");
+  });
+
+  test("webhook ingress comes up with no idle reason", () => {
+    withContext();
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
-  });
-
-  test("a provider that cannot be built leaves the channel idle", () => {
-    // vellum needs a host platform caller that does not exist yet. Plugin load
-    // has to survive that, not fail.
-    withContext();
-    const config = IMessageConfigSchema.parse({ provider: "vellum" });
-    const result = startChannelRuntime(config);
-
-    expect(result.idleReason).toContain("platform caller");
-    expect(getProvider()).toBeUndefined();
-  });
-
-  test("comms over webhooks comes up with no idle reason", () => {
-    withContext();
-    const config = IMessageConfigSchema.parse({
-      provider: "comms",
-      ingressMode: "webhook",
-    });
-    const result = startChannelRuntime(config);
 
     expect(result.idleReason).toBeUndefined();
     expect(getProvider()?.id).toBe("comms");
     expect(getChannel()?.channel).toBe("imessage");
   });
 
-  test("a webhook-only provider asked to poll reports idle", () => {
+  test("is idempotent", () => {
     withContext();
-    // Reach the vellum branch without a platform caller by asserting the
-    // guard order: the build failure is reported before the poll check.
-    const config = IMessageConfigSchema.parse({
-      provider: "vellum",
-      ingressMode: "poll",
-    });
-    expect(startChannelRuntime(config).idleReason).toBeTruthy();
+    const config = IMessageConfigSchema.parse({ ingressMode: "webhook" });
+
+    startChannelRuntime(config);
+    const second = startChannelRuntime(config);
+
+    expect(second.idleReason).toBeUndefined();
+    expect(getProvider()?.id).toBe("comms");
   });
 
-  test("restarting swaps the active provider", () => {
+  test("a provider that cannot be built leaves the channel idle", () => {
+    // Nothing injects a platform caller for vellum yet. Plugin load has to
+    // survive that rather than fail.
     withContext();
-
-    startChannelRuntime(
-      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
-    );
-    expect(getProvider()?.id).toBe("comms");
-
-    // Switching to a provider that cannot build clears the previous one rather
-    // than leaving a stale provider serving a config that no longer applies.
     const result = startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "vellum" }),
     );
-    expect(result.idleReason).toBeTruthy();
+
+    expect(result.idleReason).toContain("platform caller");
     expect(getProvider()).toBeUndefined();
   });
 
-  test("is idempotent", () => {
+  test("a failed switch clears the previous provider", () => {
+    // Leaving the old provider active would keep sending over a provider the
+    // config no longer names, while the settings app reported the new one.
     withContext();
-    const config = IMessageConfigSchema.parse({
-      provider: "comms",
-      ingressMode: "webhook",
-    });
+    startChannelRuntime(IMessageConfigSchema.parse({ ingressMode: "webhook" }));
+    expect(getProvider()?.id).toBe("comms");
+
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "vellum" }),
+    );
+
+    expect(result.idleReason).toBeTruthy();
+    expect(getProvider()).toBeUndefined();
+    expect(getChannel()).toBeUndefined();
+  });
+
+  test("a restart rebuilds the channel rather than reusing the old one", () => {
+    withContext();
+    const config = IMessageConfigSchema.parse({ ingressMode: "webhook" });
+
     startChannelRuntime(config);
-    const second = startChannelRuntime(config);
-    expect(second.idleReason).toBeUndefined();
+    const first = getChannel();
+    startChannelRuntime(config);
+
+    expect(getChannel()).not.toBe(first);
     expect(getProvider()?.id).toBe("comms");
   });
 });
@@ -129,9 +128,10 @@ describe("stopIngress", () => {
   });
 
   test("leaves the provider in place so outbound still works", () => {
+    // Inbound being down should not take sending with it.
     withContext();
     startChannelRuntime(
-      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
+      IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
     stopIngress();
     expect(getProvider()?.id).toBe("comms");

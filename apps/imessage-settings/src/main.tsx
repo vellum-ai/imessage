@@ -18,14 +18,18 @@ import { createRoot } from "react-dom/client";
 const BASE = "/x/plugins/imessage";
 
 const PROVIDER_LABELS: Record<string, string> = {
+  comms: "Comms by Osis",
   vellum: "Vellum-provided line",
-  comms: "Your own Comms account",
 };
 
 const PROVIDER_HINTS: Record<string, string> = {
-  vellum: "Vellum provides the line. Nothing to set up. Shared for now.",
-  comms: "Your own line. Requires a Comms by Osis API key in the credential store.",
+  comms:
+    "Your own account and line. Requires a Comms API key in the credential store.",
+  vellum: "Not available yet. Selecting it leaves the channel idle.",
 };
+
+/** Providers that cannot currently be brought up. */
+const UNAVAILABLE_PROVIDERS = new Set(["vellum"]);
 
 const STYLES = `
   :root { color-scheme: light dark; }
@@ -166,6 +170,8 @@ function App(): React.ReactElement {
         </div>
       ) : null}
 
+      {/* Posting the active provider bounces its ingress, which is a useful
+          way to recover a wedged poll worker without restarting the daemon. */}
       <h2>Provider</h2>
       <div className="providers">
         {settings.providers.map((id) => (
@@ -174,7 +180,7 @@ function App(): React.ReactElement {
             type="button"
             className="provider"
             aria-pressed={config.provider === id}
-            disabled={busy}
+            disabled={busy || UNAVAILABLE_PROVIDERS.has(id)}
             onClick={() => void switchProvider(id)}
           >
             <div>

@@ -7,20 +7,20 @@ import {
 } from "../config.ts";
 
 describe("resolveConfig", () => {
-  test("defaults to the vellum provider over webhooks", () => {
-    // The default path takes a user from install to working without leaving
-    // the product: no third-party account, no key to paste, and push delivery.
+  test("defaults to comms over webhooks", () => {
+    // Bring-your-own is the only path: dedicated lines are priced per line by
+    // every vendor that offers them, so there is nothing to bundle.
     const { config } = resolveConfig({});
-    expect(config.provider).toBe("vellum");
+    expect(config.provider).toBe("comms");
     expect(config.ingressMode).toBe("webhook");
     expect(config.allowedHandles).toEqual([]);
   });
 
   test("accepts an absent config", () => {
-    expect(resolveConfig(undefined).config.provider).toBe("vellum");
+    expect(resolveConfig(undefined).config.provider).toBe("comms");
   });
 
-  test("accepts the BYOK provider", () => {
+  test("accepts an explicit provider", () => {
     const { config, warnings } = resolveConfig({ provider: "comms" });
     expect(config.provider).toBe("comms");
     expect(warnings).toEqual([]);
@@ -53,7 +53,7 @@ describe("resolveConfig", () => {
 
   test("rejects an unknown provider", () => {
     const { config, warnings } = resolveConfig({ provider: "bluebubbles" });
-    expect(config.provider).toBe("vellum");
+    expect(config.provider).toBe("comms");
     expect(warnings.length).toBeGreaterThan(0);
   });
 

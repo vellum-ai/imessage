@@ -3,25 +3,29 @@
  *
  * Everything above this interface — the poller, the transport, the webhook
  * route — is provider-agnostic and must stay that way. Only the adapters under
- * `src/providers/<id>/` know what a Comms message looks like or which host
- * they talk to.
+ * `src/providers/<id>/` know what a provider's payloads look like.
  *
- * Two providers today:
+ * Two providers:
  *
- * - `vellum` (default) — Vellum provides the line. The user turns the channel
- *   on and is reachable; no third-party account, no key to paste. Comms is what
- *   runs underneath, which is an implementation detail the user never sees.
- *   The line is shared for now, so nothing above this seam may assume it
- *   belongs to a single assistant.
- * - `comms` — bring your own Comms by Osis workspace and API key.
+ * - `comms` (default) — the user's own Comms by Osis workspace, API key, and
+ *   line. Bring-your-own is the shipping path.
+ * - `vellum` — a platform-provided line. Kept, not shipping: it needs platform
+ *   endpoints and a host-injected `platformFetch` that do not exist yet, and
+ *   the economics are unresolved. Dedicated lines run about $250/line/month
+ *   from the vendors that sell them, which does not work as a bundled cost, and
+ *   a shared line cannot promise a user a stable number. It stays so the shape
+ *   is not relitigated from scratch when that changes.
  *
- * Adding a third provider means adding a directory and a registry entry.
- * Nothing outside `src/providers/` should need to change.
+ * The seam also earns its keep independently of having two entries: no official
+ * iMessage API exists, every vendor runs a macOS fleet under a
+ * tolerated-not-licensed arrangement, and one of them getting cut off should be
+ * an adapter swap rather than a rewrite. Adding a provider means adding a
+ * directory and a registry entry; nothing outside `src/providers/` changes.
  */
 
 import type { PluginInboundEvent } from "../channel/contract.ts";
 
-export const PROVIDER_IDS = ["vellum", "comms"] as const;
+export const PROVIDER_IDS = ["comms", "vellum"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /** Where an outbound message is addressed. */
@@ -57,9 +61,8 @@ export interface SendResult {
  * What a provider must implement to back this channel.
  *
  * Deliberately small. A provider that only supports webhooks can throw from
- * `fetchInbound`; a provider that only supports polling can return `undefined`
- * from `normalizeWebhook`. `supportsPolling` lets the host pick a working
- * ingress mode instead of finding out at runtime.
+ * `fetchInbound`; `supportsPolling` lets the host pick a working ingress mode
+ * instead of finding out at runtime.
  */
 export interface MessagingProvider {
   readonly id: ProviderId;
@@ -71,9 +74,8 @@ export interface MessagingProvider {
   /**
    * Confirm the provider is configured and reachable.
    *
-   * Called before the channel is considered live. Returning a reason rather
-   * than throwing keeps "not set up yet" — the normal state right after
-   * install — distinct from a genuine failure.
+   * Returning a reason rather than throwing keeps "not set up yet" — the normal
+   * state right after install — distinct from a genuine failure.
    */
   checkReadiness(): Promise<{ ready: true } | { ready: false; reason: string }>;
 

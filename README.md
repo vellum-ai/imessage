@@ -4,23 +4,30 @@ An iMessage and SMS channel for the Vellum assistant.
 
 ## What it does
 
-Makes the assistant reachable by text message. People text a line the
-assistant listens on, and it answers over iMessage where the recipient
-supports it and SMS otherwise.
+Makes the assistant reachable by text message. People text a line the assistant
+listens on, and it answers over iMessage where the recipient supports it and SMS
+otherwise. The assistant can also send on request, via the `imessage` skill.
 
 ## What it does not do
 
 It does not read the user's personal iMessage account, history, or existing
 threads.
 
-## Setup
+## Bring your own line
 
-Enable the iMessage channel for the assistant. Vellum provides the line, so
-there is no third-party account to create and no key to paste.
+You supply the line. Create a [Comms by Osis](https://comms.osis.co) account,
+provision a line, mint a Messages API key, and store it:
 
-Users who want to run the channel on their own [Comms by
-Osis](https://comms.osis.co) workspace can do that instead; see
-`skills/imessage-setup/references/comms.md`.
+```bash
+assistant credentials set --service imessage --field api_key <key>
+```
+
+Bringing your own is the only option that works today. A Vellum-provided line
+exists in the code as a `vellum` provider but is not available: dedicated lines
+cost roughly $250/line/month from the vendors that sell them, and a shared line
+cannot give anyone a stable number, so the economics are unresolved.
+
+The `imessage-setup` skill walks through the whole thing, including inbound.
 
 ## Development
 

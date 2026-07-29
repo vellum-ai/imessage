@@ -1,46 +1,95 @@
 ---
 name: imessage-setup
-description: Make the assistant reachable by iMessage and SMS. Use when the user wants to text the assistant, mentions iMessage or SMS setup, or when the imessage channel is not receiving messages.
+description: Set up the iMessage channel with a Comms by Osis account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle.
+metadata:
+  emoji: "💬"
+  vellum:
+    category: "messaging"
+    display-name: "iMessage Setup"
 ---
 
-# iMessage setup
-
-Makes the assistant reachable by text message. Delivery is iMessage where the
-recipient supports it, SMS otherwise.
+Connects the iMessage channel to the user's own [Comms by
+Osis](https://comms.osis.co) account.
 
 ## Set expectations first
 
 Say this before starting, because it is usually not what people picture:
 
-- People reach the assistant by texting **a line the assistant listens on**,
-  not the user's own number.
-- The assistant does not read the user's personal iMessage account or history.
-
-Do not tell the user the assistant gets a dedicated number of its own. On the
-default Vellum-provided path the line is shared for now, so promising a
-private number would be a promise the product does not currently keep. A user
-who needs a line of their own wants the bring-your-own-account path below.
+- The user creates their **own** Comms account and their own line. There is no
+  Vellum-provided number available today.
+- People reach the assistant by texting **that line**, not the user's own
+  number.
+- The assistant does **not** read the user's personal iMessage account or
+  history.
 
 If the user wanted the assistant to read and answer their existing personal
-iMessage threads, this is the wrong tool. Say so plainly rather than
-proceeding.
+iMessage threads, this is the wrong tool. Say so plainly rather than proceeding.
 
-## Default path
+Worth mentioning if they ask why they have to bring their own: dedicated
+iMessage lines run about $250/month from the vendors that offer them, and a
+shared line cannot give anyone a stable number. Bring-your-own is the only
+honest shape for now. Do not promise a Vellum-provided line is coming.
 
-Enable the iMessage channel for the assistant. Vellum provides the line, so
-there is no third-party account to create and no key to paste.
+## 1. Create the line and mint a key
 
-Confirm it came up:
+Direct the user to https://comms.osis.co to create a workspace, provision a
+line, and mint a Messages API key.
+
+Scopes the key needs:
+
+| Scope | Needed for |
+| --- | --- |
+| `comms_send` | Sending. Always required. |
+| `comms_read` | Poll ingress only. |
+| `comms_webhooks` | Registering the webhook endpoint. |
+
+Have them mint all three up front. **Scopes are fixed at creation** — a key
+missing one has to be replaced, not upgraded, so a second trip to the dashboard
+is the common failure of doing this piecemeal.
+
+## 2. Store the key
 
 ```bash
-assistant plugins list
+assistant credentials set --service imessage --field api_key <key>
 ```
 
-Then have the user text the assistant's line from their own phone and
-confirm it lands.
+Never put the key in `config.json` and never paste it into chat. The plugin
+reads it from the credential store at call time, so rotating it later needs no
+restart.
 
-That is the whole setup. Do not walk a user through anything below unless the
-default path is unavailable to them or they ask for it.
+## 3. Confirm sending works
+
+```bash
+bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup check from your assistant."
+```
+
+Have the user confirm it arrived. Sending is the half that needs only
+`comms_send`, so this isolates a credential problem from an ingress problem.
+
+## 4. Inbound
+
+Inbound is webhook-first. Register the endpoint with Comms pointing at:
+
+```
+<public ingress URL>/webhooks/plugins/imessage/events
+```
+
+Get the base with `assistant config get ingress.publicBaseUrl` — never hardcode
+a host. The gateway verifies the delivery signature before the plugin sees it,
+so there is nothing to configure plugin-side for that. A guardian must approve
+the plugin's ingress declaration before the gateway serves the route.
+
+If the deployment's gateway is not reachable from the internet (self-hosted
+behind NAT), switch to polling in the plugin's `config.json`:
+
+```json
+{ "ingressMode": "poll", "pollIntervalMs": 5000 }
+```
+
+Polling needs `comms_read`, runs in its own worker process, and starts from the
+moment it is enabled rather than replaying the line's history. It costs latency
+and burns requests while the line is quiet, so prefer webhooks where the
+deployment allows them.
 
 ## Configuration
 
@@ -48,37 +97,31 @@ Optional, in the plugin's `config.json`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `provider` | `"vellum"` | `"vellum"` (Vellum-provided line) or `"comms"` (bring your own account). |
-| `ingressMode` | `"webhook"` | `"webhook"` (default) or `"poll"` for deployments with no public ingress. |
+| `provider` | `"comms"` | Leave it. `"vellum"` exists but is not available and leaves the channel idle. |
+| `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
-| `sendChannel` | unset | Force `"sms"` or `"imessage"`. Unset lets the provider choose, which is almost always right. |
+| `sendChannel` | unset | Force `"sms"` or `"imessage"`. Leave unset. |
 | `allowedHandles` | `[]` | E.164 handles allowed through. Empty allows all. |
 
-`allowedHandles` is a coarse pre-filter for a line shared with something else,
-not a security control. The assistant's admission policy is the real gate, and
-it applies either way.
-
-## Testing outbound before inbound works
-
-Inbound does not reach the assistant yet on any provider, and outbound only
-works on the bring-your-own-account path. See
-[references/testing-outbound.md](references/testing-outbound.md) when the user
-wants to verify sending works.
-
-## Bring your own account
-
-Some users want to run the channel on their own Comms by Osis workspace
-instead of the Vellum-provided line. That path also gets them a line of their
-own. See [references/comms.md](references/comms.md).
+`allowedHandles` is a coarse pre-filter, not a security control — the
+assistant's admission policy is the real gate and applies either way.
 
 ## Troubleshooting
 
-**The assistant has no line** — the iMessage channel is not enabled for this
-assistant yet. Enable it; the plugin stays idle until a line exists.
+**"No Comms API key found"** — step 2 was skipped or used a different service
+name. Check with `assistant credentials list`.
 
-**Messages sent before setup do not appear** — expected. The channel starts
-from the moment of setup rather than replaying history.
+**403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
+cannot be added.
 
-**Replies contain stray punctuation** — report it. The plugin flattens
-markdown before sending because iMessage renders none, and a gap in that
-flattening is a bug worth fixing rather than working around.
+**Sends work, nothing arrives** — in webhook mode the endpoint is not
+registered, the registered URL no longer matches `ingress.publicBaseUrl` (a
+changed tunnel URL is the usual cause), or the guardian has not approved the
+ingress declaration. In poll mode the key lacks `comms_read`.
+
+**Messages sent before setup do not appear** — expected. The channel starts from
+the moment of setup rather than replaying history.
+
+**Send reports success but nothing arrives** — Comms accepted it and delivery
+failed downstream. Check the line's dashboard; the plugin only sees the API
+response, not the carrier outcome.

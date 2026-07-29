@@ -108,12 +108,6 @@ describe("flattenForPlainText", () => {
     expect(flattenForPlainText("2 * 3 = 6")).toBe("2 * 3 = 6");
   });
 
-  test("truncates an over-long reply with an ellipsis", () => {
-    const out = flattenForPlainText("x".repeat(3000));
-    expect(out.length).toBeLessThanOrEqual(1400);
-    expect(out.endsWith("…")).toBe(true);
-  });
-
   test("empty input stays empty", () => {
     expect(flattenForPlainText("   ")).toBe("");
   });
@@ -161,12 +155,64 @@ describe("transport.deliver", () => {
     expect(result.error).toContain("429");
   });
 
-  test("is provider-agnostic", async () => {
-    // Swapping the provider changes nothing about how a reply is rendered or
-    // addressed; the transport never branches on the provider id.
+  test("splits a long reply across messages instead of truncating", async () => {
+    // The old behavior cut at the limit and appended an ellipsis, silently
+    // dropping the end of every long answer.
     const { provider, sends } = stubProvider();
-    const vellumish: MessagingProvider = { ...provider, id: "vellum" };
-    await createTransport(vellumish).deliver("conv_abc", { text: "hi" });
+    const long = ("Sentence number one. " as string).repeat(200);
+
+    const result = await createTransport(provider).deliver("conv_abc", {
+      text: long,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sends.length).toBeGreaterThan(1);
+    const delivered = sends.map((s) => s.body).join(" ");
+    expect(delivered).toContain("Sentence number one.");
+  });
+
+  test("each chunk carries its own idempotency key", async () => {
+    // Keying on the whole reply would make chunk 2 look like a retry of
+    // chunk 1 and the provider would drop it.
+    const { provider, sends } = stubProvider();
+    await createTransport(provider).deliver("conv_abc", {
+      text: ("Sentence number one. " as string).repeat(200),
+    });
+
+    const keys = sends.map((s) => s.idempotencyKey);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  test("stops at the first failed chunk rather than sending out of order", async () => {
+    let calls = 0;
+    const { provider, sends } = stubProvider(async () => {
+      calls++;
+      if (calls === 2) throw new Error("429 rate limited");
+      return { id: `msg_${calls}` };
+    });
+
+    const result = await createTransport(provider).deliver("conv_abc", {
+      text: ("Sentence number one. " as string).repeat(200),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(sends.length).toBe(2);
+  });
+
+  test("never reads the provider id", async () => {
+    // Structural check on the seam: with one provider left there is no second
+    // id to swap in, so instead make reading `id` a failure. If the transport
+    // ever branches on the provider, this breaks.
+    const { provider, sends } = stubProvider();
+    const guarded = new Proxy(provider, {
+      get(target, prop, receiver) {
+        if (prop === "id") throw new Error("transport read provider.id");
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    await createTransport(guarded).deliver("conv_abc", { text: "hi" });
+
     expect(sends[0]?.body).toBe("hi");
   });
 });

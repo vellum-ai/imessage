@@ -50,7 +50,7 @@ export const IMessageConfigSchema = z.object({
     .enum(PROVIDER_IDS)
     .default("comms")
     .describe(
-      "Which provider backs the line. Only 'comms' (your own Comms by Osis account) today.",
+      "Which provider backs the line: 'comms' (your own Comms by Osis account, the default and only working option) or 'vellum' (platform-provided, not yet available).",
     ),
   ingressMode: z
     .enum(INGRESS_MODES)

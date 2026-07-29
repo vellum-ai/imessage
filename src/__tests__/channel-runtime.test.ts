@@ -3,14 +3,11 @@
  *
  * The point of `channel-runtime.ts` is that a restart from the settings app
  * runs the same code as a fresh boot. These pin the parts of that which are
- * easy to break: reporting idle instead of throwing, and tearing ingress down
- * before rebuilding it.
+ * easy to break: reporting idle instead of throwing, and clearing the previous
+ * provider before building a replacement.
  *
- * With one provider left there is no unbuildable-provider case to exercise, so
- * the clear-before-build guard in `startChannelRuntime` is not covered here.
- * It stays because a second provider will make it reachable again — a failed
- * switch must not leave the previous provider serving a config that no longer
- * names it.
+ * `vellum` is the unbuildable provider these use as a fixture — nothing injects
+ * a platform caller yet — which is what makes the failure paths reachable.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -82,6 +79,34 @@ describe("startChannelRuntime", () => {
 
     expect(second.idleReason).toBeUndefined();
     expect(getProvider()?.id).toBe("comms");
+  });
+
+  test("a provider that cannot be built leaves the channel idle", () => {
+    // Nothing injects a platform caller for vellum yet. Plugin load has to
+    // survive that rather than fail.
+    withContext();
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "vellum" }),
+    );
+
+    expect(result.idleReason).toContain("platform caller");
+    expect(getProvider()).toBeUndefined();
+  });
+
+  test("a failed switch clears the previous provider", () => {
+    // Leaving the old provider active would keep sending over a provider the
+    // config no longer names, while the settings app reported the new one.
+    withContext();
+    startChannelRuntime(IMessageConfigSchema.parse({ ingressMode: "webhook" }));
+    expect(getProvider()?.id).toBe("comms");
+
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "vellum" }),
+    );
+
+    expect(result.idleReason).toBeTruthy();
+    expect(getProvider()).toBeUndefined();
+    expect(getChannel()).toBeUndefined();
   });
 
   test("a restart rebuilds the channel rather than reusing the old one", () => {

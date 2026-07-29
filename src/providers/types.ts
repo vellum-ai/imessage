@@ -5,17 +5,19 @@
  * route — is provider-agnostic and must stay that way. Only the adapters under
  * `src/providers/<id>/` know what a provider's payloads look like.
  *
- * One provider today:
+ * Two providers:
  *
- * - `comms` — the user's own Comms by Osis workspace, API key, and line.
+ * - `comms` (default) — the user's own Comms by Osis workspace, API key, and
+ *   line. Bring-your-own is the shipping path.
+ * - `vellum` — a platform-provided line. Kept, not shipping: it needs platform
+ *   endpoints and a host-injected `platformFetch` that do not exist yet, and
+ *   the economics are unresolved. Dedicated lines run about $250/line/month
+ *   from the vendors that sell them, which does not work as a bundled cost, and
+ *   a shared line cannot promise a user a stable number. It stays so the shape
+ *   is not relitigated from scratch when that changes.
  *
- * There is deliberately no Vellum-hosted provider. Dedicated iMessage lines
- * run about $250/line/month from the vendors that offer them, which does not
- * work as a bundled cost, and a shared line cannot promise a user a stable
- * number. Bring-your-own is the whole product for now.
- *
- * The seam stays because it earns its keep even with one implementation: no
- * official iMessage API exists, every vendor runs a macOS fleet under a
+ * The seam also earns its keep independently of having two entries: no official
+ * iMessage API exists, every vendor runs a macOS fleet under a
  * tolerated-not-licensed arrangement, and one of them getting cut off should be
  * an adapter swap rather than a rewrite. Adding a provider means adding a
  * directory and a registry entry; nothing outside `src/providers/` changes.
@@ -23,7 +25,7 @@
 
 import type { PluginInboundEvent } from "../channel/contract.ts";
 
-export const PROVIDER_IDS = ["comms"] as const;
+export const PROVIDER_IDS = ["comms", "vellum"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /** Where an outbound message is addressed. */

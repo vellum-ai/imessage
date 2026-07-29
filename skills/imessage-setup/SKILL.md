@@ -15,8 +15,8 @@ Osis](https://comms.osis.co) account.
 
 Say this before starting, because it is usually not what people picture:
 
-- The user creates their **own** Comms account and their own line. Vellum does
-  not provide a number, and there is no bundled option.
+- The user creates their **own** Comms account and their own line. There is no
+  Vellum-provided number available today.
 - People reach the assistant by texting **that line**, not the user's own
   number.
 - The assistant does **not** read the user's personal iMessage account or
@@ -28,7 +28,7 @@ iMessage threads, this is the wrong tool. Say so plainly rather than proceeding.
 Worth mentioning if they ask why they have to bring their own: dedicated
 iMessage lines run about $250/month from the vendors that offer them, and a
 shared line cannot give anyone a stable number. Bring-your-own is the only
-honest shape for now.
+honest shape for now. Do not promise a Vellum-provided line is coming.
 
 ## 1. Create the line and mint a key
 
@@ -97,6 +97,7 @@ Optional, in the plugin's `config.json`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `provider` | `"comms"` | Leave it. `"vellum"` exists but is not available and leaves the channel idle. |
 | `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
 | `sendChannel` | unset | Force `"sms"` or `"imessage"`. Leave unset. |

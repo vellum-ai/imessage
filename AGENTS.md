@@ -15,23 +15,28 @@ it is a property of how the lines are provisioned. If a task here assumes
 access to `chat.db`, AppleScript, or the user's existing threads, the task
 rests on a wrong premise; say so rather than building toward it.
 
-**Bring-your-own is the whole product.** There is no Vellum-provided line and
-no bundled option: dedicated iMessage lines run about $250/line/month from the
-vendors that sell them, and a shared line cannot promise anyone a stable
-number. The user creates their own Comms account and owns the billing.
+**Bring-your-own is the shipping path.** The user creates their own Comms
+account and owns the billing. A Vellum-provided line exists as a provider but is
+not available: dedicated lines run about $250/line/month from the vendors that
+sell them, and a shared line cannot promise anyone a stable number, so the
+economics are unresolved. Do not write user-facing copy that offers it.
 
 ## Providers
 
-The channel is provider-agnostic above `src/providers/types.ts`. One provider:
+The channel is provider-agnostic above `src/providers/types.ts`. Two providers:
 
-- **`comms`** — the user's own Comms by Osis workspace, API key, and line.
-  Supports both webhook and poll ingress.
+- **`comms`** (default) — the user's own Comms by Osis workspace, API key, and
+  line. Supports both webhook and poll ingress. The only one that works today.
+- **`vellum`** — a platform-provided line. Webhook-only. **Not reachable:** it
+  needs two platform endpoints and a host-injected `platformFetch` that do not
+  exist. `resolveProvider` throws with a message naming `comms` instead. It is
+  kept so the shape is not redesigned from scratch if the economics change.
 
-The seam stays despite having one implementation, and that is deliberate. No
-official iMessage API exists; every vendor that sells lines runs a macOS fleet
-under an arrangement Apple tolerates rather than licenses, and at least one
-competitor has been permanently banned mid-product. A vendor getting cut off
-should be an adapter swap, not a rewrite.
+The seam is also worth keeping independently of the second entry. No official
+iMessage API exists; every vendor that sells lines runs a macOS fleet under an
+arrangement Apple tolerates rather than licenses, and at least one competitor has
+been permanently banned mid-product. A vendor getting cut off should be an
+adapter swap, not a rewrite.
 
 Adding a provider means adding a directory under `src/providers/` and a
 registry entry in `src/providers/index.ts`. Nothing above the seam changes. If
@@ -39,9 +44,11 @@ a change outside `src/providers/` needs to know which provider is active,
 that is the signal the seam is in the wrong place — fix the seam.
 
 The settings app (`apps/imessage-settings/`) POSTs to `routes/provider.ts` to
-(re)start the channel. With one provider that is effectively a restart button,
-which is still useful: it recovers a wedged poll worker without bouncing the
-daemon. That path and plugin boot both go through `startChannelRuntime` in
+switch or (re)start the channel. It disables `vellum` in the picker rather than
+letting someone select a provider that only produces an idle channel, and
+posting the active provider bounces its ingress — a useful way to recover a
+wedged poll worker without bouncing the daemon. That path and plugin boot both
+go through `startChannelRuntime` in
 `src/channel-runtime.ts` — deliberately, so the two cannot drift and show up as
 "it works after a restart".
 
@@ -49,9 +56,8 @@ daemon. That path and plugin boot both go through `startChannelRuntime` in
 ingress mode the provider does not support, leaves the channel idle with a
 reason the app renders. It also clears the previous provider *before* building
 the new one, so a failed switch cannot leave the old provider sending under a
-config that no longer names it. That guard is currently unreachable — one
-provider, and it always builds — so it is untested; a second provider makes it
-live again.
+config that no longer names it. `vellum` is the fixture that makes those paths
+testable: it is the provider that cannot be built.
 
 ## Outbound
 

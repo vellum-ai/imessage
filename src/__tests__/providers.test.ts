@@ -25,6 +25,7 @@ mock.module("@vellumai/plugin-api", () => ({
 
 const { createCommsProvider } = await import("../providers/comms/adapter.ts");
 const { COMMS_API_BASE } = await import("../providers/comms/client.ts");
+const { createVellumProvider } = await import("../providers/vellum/adapter.ts");
 const { PROVIDER_IDS } = await import("../providers/types.ts");
 const { resolveProvider } = await import("../providers/index.ts");
 const { IMessageConfigSchema } = await import("../config.ts");
@@ -76,15 +77,34 @@ afterEach(() => {
 });
 
 describe("provider registry", () => {
-  test("comms is the only provider", () => {
-    // Bring-your-own is the whole product; a Vellum-hosted line is priced per
-    // line by every vendor that sells one.
-    expect(PROVIDER_IDS).toEqual(["comms"]);
+  test("comms is the default", () => {
+    // Bring-your-own is the shipping path: a platform-provided line is priced
+    // per line by every vendor that sells one.
+    const config = IMessageConfigSchema.parse({});
+    expect(config.provider).toBe("comms");
+    expect(resolveProvider({ config }).id).toBe("comms");
   });
 
-  test("builds the comms provider from config", () => {
-    const config = IMessageConfigSchema.parse({});
-    expect(resolveProvider({ config }).id).toBe("comms");
+  test("knows both providers", () => {
+    expect(PROVIDER_IDS).toContain("comms");
+    expect(PROVIDER_IDS).toContain("vellum");
+  });
+
+  test("the vellum provider needs a host platform caller", () => {
+    // Kept but not reachable: nothing injects a platform caller yet, and the
+    // error says which provider to use instead rather than just failing.
+    const config = IMessageConfigSchema.parse({ provider: "vellum" });
+    expect(() => resolveProvider({ config })).toThrow(/platform caller/);
+    expect(() => resolveProvider({ config })).toThrow(/'comms'/);
+  });
+
+  test("builds the vellum provider when a caller is supplied", () => {
+    const config = IMessageConfigSchema.parse({ provider: "vellum" });
+    const provider = resolveProvider({
+      config,
+      platformFetch: async () => Response.json({}),
+    });
+    expect(provider.id).toBe("vellum");
   });
 });
 
@@ -155,5 +175,88 @@ describe("comms provider", () => {
 
   test("supports polling", () => {
     expect(createCommsProvider().supportsPolling).toBe(true);
+  });
+});
+
+describe("vellum provider", () => {
+  test("is webhook-only", async () => {
+    const provider = createVellumProvider({
+      platformFetch: async () => Response.json({}),
+    });
+
+    expect(provider.supportsPolling).toBe(false);
+    await expect(provider.fetchInbound({ limit: 10 })).rejects.toThrow(
+      /webhook-only/,
+    );
+  });
+
+  test("reports an unprovisioned line as not ready", async () => {
+    const provider = createVellumProvider({
+      platformFetch: async () => Response.json({ count: 0, results: [] }),
+    });
+
+    const readiness = await provider.checkReadiness();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("no iMessage line");
+    }
+  });
+
+  test("reports a provisioned line as ready", async () => {
+    const provider = createVellumProvider({
+      platformFetch: async () =>
+        Response.json({ count: 1, results: [{ id: "line_1" }] }),
+    });
+
+    expect((await provider.checkReadiness()).ready).toBe(true);
+  });
+
+  test("a platform error is a reason, not a throw", async () => {
+    const provider = createVellumProvider({
+      platformFetch: async () => {
+        throw new Error("network down");
+      },
+    });
+
+    expect((await provider.checkReadiness()).ready).toBe(false);
+  });
+
+  test("send carries the idempotency key and surfaces failures", async () => {
+    let seen: RequestInit | undefined;
+    const ok = createVellumProvider({
+      platformFetch: async (_path, init) => {
+        seen = init;
+        return Response.json({ message: { id: "msg_p" } });
+      },
+    });
+
+    const result = await ok.send({ to: "+15551234567" }, "hi", {
+      idempotencyKey: "k1",
+    });
+    expect(result.id).toBe("msg_p");
+    expect((seen?.headers as Record<string, string>)["Idempotency-Key"]).toBe(
+      "k1",
+    );
+
+    const failing = createVellumProvider({
+      platformFetch: async () => new Response("nope", { status: 502 }),
+    });
+    await expect(
+      failing.send({ to: "+1555" }, "hi", { idempotencyKey: "k2" }),
+    ).rejects.toThrow(/502/);
+  });
+
+  test("normalizes the same wire shape as comms", () => {
+    // The platform would run Comms underneath and forward the provider event,
+    // so a divergence here means messages silently not becoming turns.
+    const provider = createVellumProvider({
+      platformFetch: async () => Response.json({}),
+    });
+
+    const event = provider.normalizeWebhook(
+      { event: "message.received", message: commsMessage() },
+      "2026-07-28T12:00:30.000Z",
+    );
+    expect(event?.actor.actorExternalId).toBe("+15551234567");
   });
 });

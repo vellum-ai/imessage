@@ -22,10 +22,10 @@ provision a line, mint a Messages API key, and store it:
 assistant credentials set --service imessage --field api_key <key>
 ```
 
-There is no Vellum-provided option. Dedicated iMessage lines cost roughly
-$250/line/month from the vendors that sell them, and a shared line cannot give
-anyone a stable number — so bringing your own is the only shape that works
-today.
+Bringing your own is the only option that works today. A Vellum-provided line
+exists in the code as a `vellum` provider but is not available: dedicated lines
+cost roughly $250/line/month from the vendors that sell them, and a shared line
+cannot give anyone a stable number, so the economics are unresolved.
 
 The `imessage-setup` skill walks through the whole thing, including inbound.
 

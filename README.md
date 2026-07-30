@@ -29,6 +29,18 @@ cannot give anyone a stable number, so the economics are unresolved.
 
 The `imessage-setup` skill walks through the whole thing, including inbound.
 
+## Who can text it
+
+Only people who are already contacts of the assistant, with an `active` channel
+for the number they text from. Anyone else is dropped silently — no reply, so
+the sender cannot tell the line is live. There is no separate allowlist to
+maintain; the contact graph is the list.
+
+That is deliberately narrower than the assistant's normal admission policy,
+because inbound here runs the agent loop directly rather than through the
+gateway. It fails closed: an unreadable contact status is a refusal, not an
+admission.
+
 ## Development
 
 ```bash

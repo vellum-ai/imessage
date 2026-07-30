@@ -91,6 +91,47 @@ moment it is enabled rather than replaying the line's history. It costs latency
 and burns requests while the line is quiet, so prefer webhooks where the
 deployment allows them.
 
+### Turn off the Comms agent on the line
+
+If the line has a no-code Comms agent configured, **remove or disable it in the
+Comms dashboard.** It answers replies on the same line in parallel with the
+Messages API, so an incoming text gets answered by the Comms agent instead of
+the assistant. The Messages API does not need an agent. This is the most common
+reason inbound "works" but the answers are wrong.
+
+## 5. Add the people who may text it
+
+**Only existing contacts in good standing reach the assistant.** An inbound
+message is looked up against the user's contacts by phone number, and anything
+that is not an `active` contact channel is dropped silently — no reply, so the
+sender cannot tell the line is live.
+
+So before testing inbound, check that the user's own number resolves:
+
+```bash
+assistant contacts list --channel-address "+15551234567"
+```
+
+If nothing comes back, add the contact and verify the channel before expecting
+a reply. Anyone the user wants to be able to text the assistant has to be a
+contact too — there is no separate iMessage allowlist to maintain.
+
+The lookup tries channel type `imessage` first and falls back to `phone`. Today
+only `phone` exists in the contact vocabulary, so a number stored as a phone
+channel is what works.
+
+Two failure modes to name when inbound goes quiet:
+
+- The number is stored in a format that does not match. Handles are normalized
+  to E.164, so `+15551234567` matches `(555) 123-4567`, but a contact saved
+  without a country code may not resolve to the same identity.
+- The contact exists but the channel is `pending`, `unverified`, `revoked`, or
+  `blocked`. Only `active` is admitted.
+
+If the gateway is unreachable the plugin cannot read contact status, and it
+refuses rather than assuming good standing. Silence during a gateway outage is
+the designed behavior, not a bug.
+
 ## Configuration
 
 Optional, in the plugin's `config.json`:
@@ -101,10 +142,12 @@ Optional, in the plugin's `config.json`:
 | `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
 | `sendChannel` | unset | Force `"sms"` or `"imessage"`. Leave unset. |
-| `allowedHandles` | `[]` | E.164 handles allowed through. Empty allows all. |
+| `allowedHandles` | `[]` | E.164 handles allowed through. Empty means "no extra narrowing". |
 
-`allowedHandles` is a coarse pre-filter, not a security control — the
-assistant's admission policy is the real gate and applies either way.
+`allowedHandles` only narrows further; it never widens. The contact check in
+step 5 is the gate and runs either way, so an empty list does **not** mean
+anyone can text the assistant. Set it only when the line carries other traffic
+that should not reach the assistant at all.
 
 ## Troubleshooting
 
@@ -118,6 +161,15 @@ cannot be added.
 registered, the registered URL no longer matches `ingress.publicBaseUrl` (a
 changed tunnel URL is the usual cause), or the guardian has not approved the
 ingress declaration. In poll mode the key lacks `comms_read`.
+
+**Texts arrive at Comms but the assistant never replies** — the sender is not
+an `active` contact, so it was refused. Refusals are silent by design; the
+reason is in the daemon log. Check with
+`assistant contacts list --channel-address "<their number>"`.
+
+**Replies come back but they are not from the assistant** — a Comms agent is
+configured on the line and is answering in parallel. Remove or disable it in
+the Comms dashboard.
 
 **Messages sent before setup do not appear** — expected. The channel starts from
 the moment of setup rather than replaying history.

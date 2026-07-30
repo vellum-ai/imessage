@@ -11,8 +11,13 @@
  * handler only has to decide whether the payload is a turn.
  */
 
-import { isAllowedHandle } from "../src/config.ts";
-import { getConfig, getProvider } from "../src/plugin-state.ts";
+import { deliverInbound } from "../src/inbound.ts";
+import {
+  getChannel,
+  getConfig,
+  getInitContext,
+  getProvider,
+} from "../src/plugin-state.ts";
 
 export async function POST(request: Request): Promise<Response> {
   const config = getConfig();
@@ -40,14 +45,33 @@ export async function POST(request: Request): Promise<Response> {
     return json(200, { ok: true, ignored: "not an inbound message" });
   }
 
-  if (!isAllowedHandle(config, event.actor.actorExternalId)) {
-    return json(200, { ok: true, ignored: "handle outside the allowlist" });
+  const ctx = getInitContext();
+  if (!ctx) {
+    return json(503, { error: "plugin not initialized" });
   }
 
-  // TODO(pluggable-channels): forward to the host's inbound pipeline so the
-  // event runs through the kill switch, trust classification, and the
-  // admission floor. See the matching note in hooks/init.ts.
-  return json(200, { ok: true });
+  // The turn is awaited rather than backgrounded so a provider retry sees a
+  // real outcome. Comms retries on a non-2xx, and answering 200 before the
+  // turn finished would turn a failed turn into a silently dropped message.
+  const outcome = await deliverInbound({
+    event,
+    config,
+    storageDir: ctx.pluginStorageDir,
+    logger: ctx.logger,
+    reply: async (conversationExternalId, text) => {
+      const channel = getChannel();
+      if (!channel) throw new Error("channel is not running");
+      const result = await channel.transport.deliver(conversationExternalId, {
+        text,
+      });
+      if (!result.ok) throw new Error(result.error ?? "delivery failed");
+    },
+  });
+
+  // A refusal is still a 200: the delivery was valid and Comms retrying it
+  // would not change who the sender is. Only the reason is logged, never
+  // returned — telling an unadmitted sender why would confirm the line is live.
+  return json(200, { ok: true, delivered: outcome.delivered });
 }
 
 function json(status: number, body: unknown): Response {

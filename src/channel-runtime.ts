@@ -13,7 +13,9 @@
 
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
+import { deliverInbound } from "./inbound.ts";
 import {
+  getChannel,
   getInitContext,
   getSupervisor,
   setChannel,
@@ -23,6 +25,29 @@ import {
 } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
 import { PollWorkerSupervisor } from "./worker/supervisor.ts";
+
+/**
+ * Send a reply back over whichever channel is currently up.
+ *
+ * Reads the channel at call time rather than capturing it: a provider switch
+ * replaces the transport, and a captured one would keep sending over the
+ * provider the config no longer names.
+ */
+async function replyOverChannel(
+  conversationExternalId: string,
+  text: string,
+): Promise<void> {
+  const channel = getChannel();
+  if (!channel) {
+    throw new Error("channel is not running");
+  }
+  const result = await channel.transport.deliver(conversationExternalId, {
+    text,
+  });
+  if (!result.ok) {
+    throw new Error(result.error ?? "delivery failed");
+  }
+}
 
 export interface StartRuntimeResult {
   /** Why the channel is idle, or `undefined` when it came up. */
@@ -101,20 +126,14 @@ export function startChannelRuntime(
       allowedHandles: config.allowedHandles,
     },
     logger: ctx.logger,
-    sink: (event) => {
-      // TODO(pluggable-channels): hand the event to the host's inbound
-      // pipeline so it runs through the kill switch, trust classification, and
-      // the admission floor. Posting straight into a conversation would bypass
-      // all three, which is exactly the gap this channel must not open.
-      ctx.logger.info(
-        {
-          actorExternalId: event.actor.actorExternalId,
-          conversationExternalId: event.message.conversationExternalId,
-          externalMessageId: event.message.externalMessageId,
-          chatType: event.source.chatType,
-        },
-        "imessage: normalized inbound message",
-      );
+    sink: async (event) => {
+      await deliverInbound({
+        event,
+        config,
+        storageDir: ctx.pluginStorageDir,
+        logger: ctx.logger,
+        reply: replyOverChannel,
+      });
     },
   });
 

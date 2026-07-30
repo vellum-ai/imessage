@@ -67,8 +67,8 @@ Two callers, one set of rules.
   deliberately. `scripts/send.ts` runs as a standalone bun process, so it
   resolves the API key via `assistant credentials reveal` rather than the
   in-process credential API.
-- **The channel transport** (`src/channel/transport.ts`) is how a reply goes
-  back out once the host's inbound pipeline exists.
+- **The channel transport** (`src/channel/transport.ts`) is how a reply to an
+  inbound message goes back out.
 
 Both import `src/channel/render.ts`, which is dependency-free for exactly that
 reason: a skill-script send and a channel reply must format identically, and two
@@ -92,6 +92,61 @@ internet. It runs in **its own worker process** (`src/worker/`), not the
 daemon: a busy line or a slow provider must not compete with the assistant's
 event loop, and a crash in the loop must not take the daemon down. The
 supervisor restarts it with backoff.
+
+## Inbound delivery
+
+Both ingress modes converge on `deliverInbound` in `src/inbound.ts` — the poll
+worker's sink and the webhook route call the same function, so they cannot
+diverge on who gets in or how a reply goes back out. The path is: config
+allowlist narrows → `admitSender` → `runConversationTurn` → bind the thread →
+flatten to text → reply.
+
+**`runConversationTurn` bypasses the gateway.** It takes no actor, no trust
+class, and no channel, so an inbound message that reaches it has gone around
+the `no_one` kill switch, trust classification, and the per-channel admission
+floor. That is not a subtlety to rediscover later; it is the entire reason
+`src/channel/admit.ts` exists.
+
+**Admission is gated on the user's contacts, not on a list this plugin keeps.**
+`admitSender` looks the sender's E.164 handle up through the host's contact API
+(`findContactByChannelAddress`, tried as `imessage` then `phone`) and admits
+only a match whose channel status is `active`. One place to add and remove
+people, no second list to drift. Everything fails closed:
+
+- lookup throws (including a host too old to expose it) → refuse
+- `status === undefined` (gateway unreachable) → refuse; unknown standing is
+  not good standing
+- any non-`active` status → refuse, and **do not** fall through to the next
+  channel type — a blocked `imessage` row must not be re-admitted via `phone`
+
+This is a stopgap. When the host's channel pipeline accepts plugin-supplied
+inbound, `src/inbound.ts` collapses into a call to it and `admit.ts` goes away.
+
+**Refusals are silent to the sender.** No reply, and the route still returns
+200 without the reason in the body. Answering "you are not a contact" confirms
+the line is live and answers a stranger, which is what an unadmitted sender
+must not get. The reason goes to the daemon log only.
+
+**The contact lookup is reached through `src/host-contacts.ts`, not imported
+directly.** It is a newer `@vellumai/plugin-api` export than the pinned
+peerDependency floor, so it is resolved off the namespace at call time and its
+absence throws — which `admit.ts` turns into a refusal. Delete the shim and
+import directly once the floor is above the release that adds it.
+
+**Threads are bound in `src/conversation-map.ts`**, durably under
+`pluginStorageDir`, `conversationExternalId → assistant conversationId`.
+Without it every text starts a fresh conversation and the assistant has amnesia
+between messages. Two details are load-bearing: the map is **re-read before
+every write** (the poll worker and the webhook route are separate processes, so
+a cached in-memory copy in one would clobber the other's bindings), and the
+bind happens **after** the first successful turn (binding an id for a turn that
+then failed strands the thread on a conversation holding no messages). A
+corrupt or schema-invalid map degrades to empty rather than throwing: losing
+thread continuity is bad, refusing to answer at all is worse.
+
+**A failed reply is not a failed turn.** The turn is already persisted;
+retrying it would double-answer. `deliverInbound` reports the delivery failure
+and does not re-run.
 
 ## Comms API facts worth not re-deriving
 

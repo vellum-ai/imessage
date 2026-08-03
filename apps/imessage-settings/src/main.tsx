@@ -10,10 +10,15 @@
  * settings field), and showing whether the channel is actually running. A
  * configured provider that failed to build reports `idleReason`, and surfacing
  * that is the difference between "misconfigured" and "silently broken".
+ *
+ * Requests go through `api.ts`, which reaches the routes over the host bridge
+ * — never the global `fetch`, which cannot escape the sandbox.
  */
 
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+
+import { apiRequest, messageOf } from "./api.ts";
 
 const BASE = "/x/plugins/imessage";
 
@@ -90,6 +95,12 @@ interface Settings {
   activeProvider: string | null;
 }
 
+interface ProviderChange {
+  config: Settings["config"];
+  activeProvider: string | null;
+  idleReason?: string | null;
+}
+
 function App(): React.ReactElement {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [idleReason, setIdleReason] = useState<string | null>(null);
@@ -98,12 +109,12 @@ function App(): React.ReactElement {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/settings`);
-      if (!res.ok) throw new Error(`settings request failed: ${res.status}`);
-      setSettings(await res.json());
+      setSettings(
+        await apiRequest<Settings>("Loading settings", `${BASE}/settings`),
+      );
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(messageOf(err));
     }
   }, []);
 
@@ -115,18 +126,21 @@ function App(): React.ReactElement {
     async (provider: string) => {
       setBusy(true);
       setError(null);
+      const label = PROVIDER_LABELS[provider] ?? provider;
       try {
-        const res = await fetch(`${BASE}/provider`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ provider }),
-        });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body?.error ?? `failed: ${res.status}`);
+        const body = await apiRequest<ProviderChange>(
+          `Switching to ${label}`,
+          `${BASE}/provider`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ provider }),
+          },
+        );
         setIdleReason(body.idleReason ?? null);
         await load();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(messageOf(err));
       } finally {
         setBusy(false);
       }

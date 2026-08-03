@@ -127,6 +127,22 @@ payload corrects the guesses.
 - **No raw control bytes in source.** One NUL makes git classify the file as
   binary and the diff disappears from review entirely. Write control characters
   as escapes. `src/__tests__/source-hygiene.test.ts` enforces this.
+- **An app calls `window.vellum.fetch`, never the global `fetch`.** Apps under
+  `apps/` are served in a sandboxed iframe whose origin is not the assistant's,
+  so a bare `fetch` to a plugin route is cross-origin, carries no session, and
+  fails as an opaque "Failed to fetch" — no status, no body, nothing naming the
+  cause. The host injects the bridge; `@vellumai/plugin-api/app` types it
+  (type-only, because an app cannot rely on runtime imports in the sandbox).
+  `src/__tests__/app-bridge.test.ts` enforces it, because the failure only
+  reproduces inside the sandbox — a same-origin dev server does not see it.
+- **Request failures in an app are described from the response.** Status line,
+  then the route's own `{ error, detail }` where there is one, then the raw
+  body: a request can also fail ahead of the route, at the host proxy or the
+  gateway, and those do not answer in the plugin's shape. Both this and the
+  bridge call live in `apps/imessage-settings/src/api.ts`, apart from the
+  rendering, so they are testable — `src/__tests__/app-api.test.ts` runs them
+  under Bun. That is also why the bridge is read off `globalThis` rather than
+  `window`: no DOM lib in this tsconfig, and no `window` under Bun.
 - **The channel id is derived, not declared.** `CHANNEL_ID` in
   `src/plugin-paths.ts` is the plugin's directory name, because the host
   already serves this plugin at `/x/plugins/<name>/` and

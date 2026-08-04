@@ -9,12 +9,20 @@
 import { z } from "zod";
 
 import type { PluginInboundEvent } from "../channel/contract.ts";
+import { PROVIDER_IDS } from "../providers/types.ts";
 
-/** Config the supervisor hands the worker on startup. */
+/**
+ * Config the supervisor hands the worker on startup.
+ *
+ * `provider` comes from `PROVIDER_IDS` rather than a list spelled out here: a
+ * second copy can only ever agree with the registry or reject a provider the
+ * rest of the plugin accepts, and the worker refusing to start is a quiet way
+ * for that to show up.
+ */
 export const WorkerBootstrapSchema = z.object({
   storageDir: z.string().min(1),
   intervalMs: z.number().int().positive(),
-  provider: z.enum(["vellum", "comms"]),
+  provider: z.enum(PROVIDER_IDS),
   sendChannel: z.enum(["sms", "imessage"]).optional(),
   allowedHandles: z.array(z.string()).default([]),
 });

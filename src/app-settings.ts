@@ -56,6 +56,23 @@ export const ProviderChangeSchema = z
 export type ProviderChange = z.infer<typeof ProviderChangeSchema>;
 
 /**
+ * Body accepted by the credentials route.
+ *
+ * `values` is an open record rather than a per-provider shape: which fields a
+ * provider takes lives in `PROVIDER_CREDENTIALS`, and validating it twice
+ * means one of the copies is eventually wrong. `storeCredentials` rejects a
+ * field the named provider does not have.
+ */
+export const CredentialUpdateSchema = z
+  .object({
+    provider: z.enum(PROVIDER_IDS),
+    values: z.record(z.string(), z.string()),
+  })
+  .strict();
+
+export type CredentialUpdate = z.infer<typeof CredentialUpdateSchema>;
+
+/**
  * Parse `config.json` into a plain object.
  *
  * Returns `{}` when the file is missing or unparsable, so a fresh install

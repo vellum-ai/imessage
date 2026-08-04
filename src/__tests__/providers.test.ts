@@ -25,7 +25,10 @@ mock.module("@vellumai/plugin-api", () => ({
 
 const { createCommsProvider } = await import("../providers/comms/adapter.ts");
 const { COMMS_API_BASE } = await import("../providers/comms/client.ts");
-const { createVellumProvider } = await import("../providers/vellum/adapter.ts");
+const { createPhotonProvider } = await import("../providers/photon/adapter.ts");
+const { PHOTON_CLOUD_BASE, PHOTON_IMESSAGE_BASE } = await import(
+  "../providers/photon/client.ts"
+);
 const { PROVIDER_IDS } = await import("../providers/types.ts");
 const { resolveProvider } = await import("../providers/index.ts");
 const { IMessageConfigSchema } = await import("../config.ts");
@@ -87,24 +90,25 @@ describe("provider registry", () => {
 
   test("knows both providers", () => {
     expect(PROVIDER_IDS).toContain("comms");
-    expect(PROVIDER_IDS).toContain("vellum");
+    expect(PROVIDER_IDS).toContain("photon");
   });
 
-  test("the vellum provider needs a host platform caller", () => {
-    // Kept but not reachable: nothing injects a platform caller yet, and the
-    // error says which provider to use instead rather than just failing.
-    const config = IMessageConfigSchema.parse({ provider: "vellum" });
-    expect(() => resolveProvider({ config })).toThrow(/platform caller/);
-    expect(() => resolveProvider({ config })).toThrow(/'comms'/);
+  test("builds photon from config alone", () => {
+    // Nothing is injected and nothing is resolved at build time: an
+    // unconfigured line has to cost nothing at boot, so a missing credential
+    // surfaces from checkReadiness rather than from a provider that refuses
+    // to exist.
+    const config = IMessageConfigSchema.parse({ provider: "photon" });
+    expect(resolveProvider({ config }).id).toBe("photon");
   });
 
-  test("builds the vellum provider when a caller is supplied", () => {
-    const config = IMessageConfigSchema.parse({ provider: "vellum" });
-    const provider = resolveProvider({
-      config,
-      platformFetch: async () => Response.json({}),
-    });
-    expect(provider.id).toBe("vellum");
+  test("every provider id resolves to an adapter that claims it", () => {
+    // A registry entry keyed by one id and returning another is the kind of
+    // thing that only shows up as messages going out over the wrong line.
+    for (const id of PROVIDER_IDS) {
+      const config = IMessageConfigSchema.parse({ provider: id });
+      expect(resolveProvider({ config }).id).toBe(id);
+    }
   });
 });
 
@@ -178,85 +182,285 @@ describe("comms provider", () => {
   });
 });
 
-describe("vellum provider", () => {
-  test("is webhook-only", async () => {
-    const provider = createVellumProvider({
-      platformFetch: async () => Response.json({}),
-    });
 
-    expect(provider.supportsPolling).toBe(false);
-    await expect(provider.fetchInbound({ limit: 10 })).rejects.toThrow(
-      /webhook-only/,
+/**
+ * Photon fixtures.
+ *
+ * Photon answers on two hosts — a control plane that mints tokens and a
+ * message plane that uses them — so these route on the URL rather than
+ * stubbing one endpoint. `credentialValue` stands in for both the project id
+ * and the project secret, which is why the Basic header below is that value
+ * twice.
+ */
+const SHARED_TOKEN = {
+  succeed: true,
+  data: { type: "shared", token: "tok_live", expiresIn: 600 },
+};
+
+function stubPhoton(handler: (call: FetchCall) => Response | undefined): void {
+  stubFetch((call) => {
+    const answered = handler(call);
+    if (answered) return answered;
+    if (call.path.includes("/imessage/tokens")) {
+      return Response.json(SHARED_TOKEN);
+    }
+    return Response.json({ succeed: true, data: {} });
+  });
+}
+
+function photonMessage(overrides: Record<string, unknown> = {}) {
+  return {
+    guid: "p2p-A1",
+    isFromMe: false,
+    dateCreated: "2026-07-28T12:00:00.000Z",
+    chatGuids: ["any;-;+15551234567"],
+    sender: { address: "+15551234567", service: "iMessage" },
+    content: { text: "hello" },
+    ...overrides,
+  };
+}
+
+/** The documented `messages` webhook delivery. */
+function photonWebhook(overrides: Record<string, unknown> = {}) {
+  return {
+    event: "messages",
+    space: { id: "any;-;+15550100", platform: "iMessage", type: "dm" },
+    message: {
+      id: "spc-msg-1",
+      platform: "iMessage",
+      direction: "inbound",
+      timestamp: "2026-07-28T12:00:00.000Z",
+      sender: { id: "+15550100", platform: "iMessage" },
+      space: { id: "any;-;+15550100", platform: "iMessage", type: "dm" },
+      content: { type: "text", text: "hey, what time is dinner?" },
+      ...overrides,
+    },
+  };
+}
+
+describe("photon provider", () => {
+  test("readiness proves the credential pair, not just its presence", async () => {
+    // Stopping at "both fields are stored" reports ready for a mistyped
+    // project id, and the first symptom of that is a silently dead line.
+    stubPhoton((call) =>
+      call.path === `${PHOTON_CLOUD_BASE}/projects/test-key/`
+        ? Response.json({ succeed: true, data: { name: "demo", slug: "demo" } })
+        : undefined,
     );
+
+    expect((await createPhotonProvider().checkReadiness()).ready).toBe(true);
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Basic ${btoa("test-key:test-key")}`);
   });
 
-  test("reports an unprovisioned line as not ready", async () => {
-    const provider = createVellumProvider({
-      platformFetch: async () => Response.json({ count: 0, results: [] }),
-    });
+  test("a rejected envelope becomes a reason, not a throw", async () => {
+    // Photon reports failure inside a 200 body, so status alone would read
+    // this as success.
+    stubPhoton(() =>
+      Response.json({ succeed: false, message: "invalid credentials" }),
+    );
 
-    const readiness = await provider.checkReadiness();
+    const readiness = await createPhotonProvider().checkReadiness();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
-      expect(readiness.reason).toContain("no iMessage line");
+      expect(readiness.reason).toContain("invalid credentials");
     }
   });
 
-  test("reports a provisioned line as ready", async () => {
-    const provider = createVellumProvider({
-      platformFetch: async () =>
-        Response.json({ count: 1, results: [{ id: "line_1" }] }),
-    });
+  test("a missing credential is a reason naming the settings app", async () => {
+    credentialMode = "throw";
+    const readiness = await createPhotonProvider().checkReadiness();
 
-    expect((await provider.checkReadiness()).ready).toBe(true);
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("Photon project ID");
+      expect(readiness.reason).toContain("settings app");
+    }
   });
 
-  test("a platform error is a reason, not a throw", async () => {
-    const provider = createVellumProvider({
-      platformFetch: async () => {
-        throw new Error("network down");
-      },
-    });
-
-    expect((await provider.checkReadiness()).ready).toBe(false);
-  });
-
-  test("send carries the idempotency key and surfaces failures", async () => {
-    let seen: RequestInit | undefined;
-    const ok = createVellumProvider({
-      platformFetch: async (_path, init) => {
-        seen = init;
-        return Response.json({ message: { id: "msg_p" } });
-      },
-    });
-
-    const result = await ok.send({ to: "+15551234567" }, "hi", {
-      idempotencyKey: "k1",
-    });
-    expect(result.id).toBe("msg_p");
-    expect((seen?.headers as Record<string, string>)["Idempotency-Key"]).toBe(
-      "k1",
+  test("a reply to a known chat mints a token and sends to the guid", async () => {
+    stubPhoton((call) =>
+      call.path.includes("/v1/messages:sendText")
+        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
+        : undefined,
     );
 
-    const failing = createVellumProvider({
-      platformFetch: async () => new Response("nope", { status: 502 }),
+    const result = await createPhotonProvider().send(
+      { conversationId: "any;-;+15551234567" },
+      "hi",
+      { idempotencyKey: "k1" },
+    );
+
+    expect(result.id).toBe("p2p-out");
+    expect(calls[0]?.path).toBe(
+      `${PHOTON_CLOUD_BASE}/projects/test-key/imessage/tokens`,
+    );
+
+    const send = calls[1];
+    expect(send?.path).toBe(`${PHOTON_IMESSAGE_BASE}/v1/messages:sendText`);
+    const headers = send?.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok_live");
+    expect(headers["x-idempotency-key"]).toBe("k1");
+    expect(JSON.parse(String(send?.init.body))).toMatchObject({
+      chatGuid: "any;-;+15551234567",
+      text: "hi",
+      clientMessageId: "k1",
     });
-    await expect(
-      failing.send({ to: "+1555" }, "hi", { idempotencyKey: "k2" }),
-    ).rejects.toThrow(/502/);
   });
 
-  test("normalizes the same wire shape as comms", () => {
-    // The platform would run Comms underneath and forward the provider event,
-    // so a divergence here means messages silently not becoming turns.
-    const provider = createVellumProvider({
-      platformFetch: async () => Response.json({}),
+  test("a cold send to a bare handle resolves the chat in the same call", async () => {
+    // Photon addresses conversations by chat guid, so a raw handle needs one
+    // resolved. Carrying the text along makes that one round trip, not two.
+    stubPhoton((call) =>
+      call.path.includes("/v1/chats")
+        ? Response.json({
+            chat: { guid: "any;-;+15551234567" },
+            initialMessage: { guid: "p2p-first", isFromMe: true },
+          })
+        : undefined,
+    );
+
+    const result = await createPhotonProvider().send(
+      { to: "+15551234567" },
+      "hi",
+      { idempotencyKey: "k2" },
+    );
+
+    expect(result.id).toBe("p2p-first");
+    const body = JSON.parse(String(calls[1]?.init.body));
+    expect(body.addresses).toEqual(["+15551234567"]);
+    expect(body.initialMessage).toEqual({ text: "hi" });
+    expect(calls.some((c) => c.path.includes("sendText"))).toBe(false);
+  });
+
+  test("a dedicated project routes to its instance", async () => {
+    stubPhoton((call) =>
+      call.path.includes("/imessage/tokens")
+        ? Response.json({
+            succeed: true,
+            data: {
+              type: "dedicated",
+              auth: { "inst-7": "tok_dedicated" },
+              numbers: { "inst-7": "+15550100" },
+              expiresIn: 600,
+            },
+          })
+        : Response.json({ message: { guid: "p2p-out", isFromMe: true } }),
+    );
+
+    await createPhotonProvider().send({ conversationId: "any;-;+1555" }, "hi", {
+      idempotencyKey: "k3",
     });
 
-    const event = provider.normalizeWebhook(
-      { event: "message.received", message: commsMessage() },
+    const headers = calls[1]?.init.headers as Record<string, string>;
+    expect(headers["x-photon-server"]).toBe("inst-7");
+    expect(headers.Authorization).toBe("Bearer tok_dedicated");
+  });
+
+  test("the token is minted once and reused", async () => {
+    // A busy line must not mint per message.
+    stubPhoton((call) =>
+      call.path.includes("sendText")
+        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
+        : undefined,
+    );
+    const provider = createPhotonProvider();
+
+    await provider.send({ conversationId: "any;-;+1555" }, "one", {
+      idempotencyKey: "a",
+    });
+    await provider.send({ conversationId: "any;-;+1555" }, "two", {
+      idempotencyKey: "b",
+    });
+
+    const mints = calls.filter((c) => c.path.includes("/imessage/tokens"));
+    expect(mints).toHaveLength(1);
+  });
+
+  test("a token that expired mid-flight is re-minted once", async () => {
+    // Expiry is routine, not an error the caller should have to model.
+    let sends = 0;
+    stubPhoton((call) => {
+      if (!call.path.includes("sendText")) return undefined;
+      sends++;
+      return sends === 1
+        ? new Response("token expired", { status: 401 })
+        : Response.json({ message: { guid: "p2p-retry", isFromMe: true } });
+    });
+
+    const result = await createPhotonProvider().send(
+      { conversationId: "any;-;+1555" },
+      "hi",
+      { idempotencyKey: "k4" },
+    );
+
+    expect(result.id).toBe("p2p-retry");
+    expect(calls.filter((c) => c.path.includes("/imessage/tokens"))).toHaveLength(
+      2,
+    );
+  });
+
+  test("polling normalizes inside the adapter and skips our own messages", async () => {
+    stubPhoton((call) =>
+      call.path.includes("listRecent")
+        ? Response.json({
+            messages: [
+              photonMessage(),
+              photonMessage({ guid: "p2p-B2", isFromMe: true }),
+            ],
+          })
+        : undefined,
+    );
+
+    const records = await createPhotonProvider().fetchInbound({
+      since: "2026-07-28T11:00:00.000Z",
+      limit: 10,
+    });
+
+    expect(records).toHaveLength(2);
+    expect(records[0]?.event?.actor.actorExternalId).toBe("+15551234567");
+    expect(records[0]?.createdAt).toBe("2026-07-28T12:00:00.000Z");
+    // An echo still carries its id, or the cursor never moves past it.
+    expect(records[1]?.id).toBe("p2p-B2");
+    expect(records[1]?.event).toBeUndefined();
+
+    const listed = calls.find((c) => c.path.includes("listRecent"))?.path ?? "";
+    expect(listed).toContain("after=2026-07-28T11%3A00%3A00.000Z");
+    expect(listed).toContain("isFromMe=false");
+  });
+
+  test("normalizes the documented webhook delivery", () => {
+    const event = createPhotonProvider().normalizeWebhook(
+      photonWebhook(),
       "2026-07-28T12:00:30.000Z",
     );
-    expect(event?.actor.actorExternalId).toBe("+15551234567");
+
+    expect(event?.actor.actorExternalId).toBe("+15550100");
+    // The space id is the chat guid a reply is addressed to, so binding on it
+    // is what lets a reply skip chat resolution.
+    expect(event?.message.conversationExternalId).toBe("any;-;+15550100");
+    expect(event?.message.content).toBe("hey, what time is dinner?");
+    expect(event?.source.chatType).toBe("imessage");
+    expect(event?.receivedAt).toBe("2026-07-28T12:00:30.000Z");
+  });
+
+  test("an outbound echo is never a turn", () => {
+    const event = createPhotonProvider().normalizeWebhook(
+      photonWebhook({ direction: "outbound" }),
+      "2026-07-28T12:00:30.000Z",
+    );
+    expect(event).toBeUndefined();
+  });
+
+  test("an unattributable delivery is dropped rather than guessed at", () => {
+    const event = createPhotonProvider().normalizeWebhook(
+      photonWebhook({ sender: { id: "not-a-number" } }),
+      "2026-07-28T12:00:30.000Z",
+    );
+    expect(event).toBeUndefined();
+  });
+
+  test("supports polling", () => {
+    expect(createPhotonProvider().supportsPolling).toBe(true);
   });
 });

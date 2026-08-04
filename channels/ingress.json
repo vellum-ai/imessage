@@ -3,7 +3,7 @@
     {
       "path": "events",
       "kind": "http",
-      "description": "Inbound message webhooks from the Comms by Osis line (message.received). Signature-verified; rejects every delivery when no signing secret is stored."
+      "description": "Inbound message webhooks from the configured provider's line — Comms by Osis (message.received) or Photon (messages). Signature-verified; rejects every delivery when no signing secret is stored."
     }
   ]
 }

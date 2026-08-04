@@ -15,17 +15,24 @@ threads.
 
 ## Bring your own line
 
-You supply the line. Create a [Comms by Osis](https://comms.osis.co) account,
-provision a line, mint a Messages API key, and store it:
+You supply the line, from either of two providers:
+
+| Provider | You need | Where |
+| --- | --- | --- |
+| **Comms by Osis** (default) | A Messages API key | [comms.osis.co](https://comms.osis.co) |
+| **Photon** | A project ID and project secret | [photon.codes](https://photon.codes) |
+
+Pick the provider and fill in its credentials in the plugin's settings app, or
+store them from a terminal:
 
 ```bash
 assistant credentials set --service imessage --field api_key <key>
 ```
 
-Bringing your own is the only option that works today. A Vellum-provided line
-exists in the code as a `vellum` provider but is not available: dedicated lines
-cost roughly $250/line/month from the vendors that sell them, and a shared line
-cannot give anyone a stable number, so the economics are unresolved.
+Bringing your own is the only option. A provider-neutral line from us is not on
+offer: dedicated lines cost roughly $250/line/month from the vendors that sell
+them, and a shared line cannot give anyone a stable number, so the economics are
+unresolved.
 
 The `imessage-setup` skill walks through the whole thing, including inbound.
 

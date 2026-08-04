@@ -4,19 +4,20 @@
  * The host hands the plugin its parsed config as `InitContext.config` (an
  * `unknown`). This module owns the single Zod schema that validates it.
  *
- * The Comms API key is deliberately not a config field, and the credential's
- * name is not configurable: the provider always resolves it from a single fixed
- * credential so the secret lives in the credential store rather than as
- * plaintext in `config.json`.
+ * No secret is a config field, and no credential name is configurable: each
+ * provider resolves from the fixed set of fields declared in
+ * `PROVIDER_CREDENTIALS`, so secrets live in the credential store rather than
+ * as plaintext in `config.json`.
  */
 
 import { resolveCredential } from "@vellumai/plugin-api";
 import { z } from "zod";
 
+import type { ProviderId } from "./providers/types.ts";
 import { PROVIDER_IDS } from "./providers/types.ts";
 
 /**
- * Fixed credential the provider reads its key from.
+ * Fixed credential service the providers read their secrets from.
  *
  * `resolveCredential` takes a `"service/field"` ref; the colon form
  * (`imessage:api_key`) is the human-facing name used by the `assistant
@@ -25,6 +26,57 @@ import { PROVIDER_IDS } from "./providers/types.ts";
  */
 export const CREDENTIAL_SERVICE = "imessage";
 export const API_KEY_FIELD = "api_key";
+
+/**
+ * One credential a provider needs, as the settings app renders it.
+ *
+ * `secret: false` is not decoration. A Photon project id is an identifier that
+ * appears in its own dashboard URL, and masking it means a user cannot check
+ * the value they just pasted against the one on screen. Masking exists for the
+ * value that would compromise the account, not for every field next to it.
+ */
+export interface CredentialField {
+  /** Field name within the `imessage` credential service. */
+  field: string;
+  label: string;
+  hint: string;
+  secret: boolean;
+}
+
+/**
+ * What each provider needs stored before it can do anything.
+ *
+ * The settings app reads this to render its fields, and `checkReadiness` on
+ * each adapter resolves exactly these. One list, so a provider cannot ask for
+ * a credential the app never offers to collect.
+ */
+export const PROVIDER_CREDENTIALS: Record<
+  ProviderId,
+  readonly CredentialField[]
+> = {
+  comms: [
+    {
+      field: API_KEY_FIELD,
+      label: "Comms API key",
+      hint: "Messages API key from your Comms by Osis workspace, with the comms_send and comms_read scopes.",
+      secret: true,
+    },
+  ],
+  photon: [
+    {
+      field: "photon_project_id",
+      label: "Photon project ID",
+      hint: "From your project in the Photon dashboard. Used as the Basic-auth username.",
+      secret: false,
+    },
+    {
+      field: "photon_project_secret",
+      label: "Photon project secret",
+      hint: "Issued with the project id. Rotate it in the Photon CLI if it leaks.",
+      secret: true,
+    },
+  ],
+};
 
 /**
  * How inbound messages reach the plugin.
@@ -50,7 +102,7 @@ export const IMessageConfigSchema = z.object({
     .enum(PROVIDER_IDS)
     .default("comms")
     .describe(
-      "Which provider backs the line: 'comms' (your own Comms by Osis account, the default and only working option) or 'vellum' (platform-provided, not yet available).",
+      "Which provider backs the line: 'comms' (your own Comms by Osis account, the default) or 'photon' (your own Photon project).",
     ),
   ingressMode: z
     .enum(INGRESS_MODES)
@@ -118,28 +170,36 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
 }
 
 /**
- * Read the Comms API key from the credential store.
+ * Read one stored credential field.
  *
  * Resolved at call time rather than at load, so a rotated key takes effect
  * without a daemon restart and an unconfigured line fails only when it is
  * actually used.
  *
  * `resolveCredential` throws when the reference does not resolve; that is
- * rewritten here into an error naming the command that fixes it.
+ * rewritten here into an error naming both places the value can be set. The
+ * settings app is the shorter path, and a user looking at this message inside
+ * the app should not be told to go find a terminal.
  */
-export async function resolveApiKey(): Promise<string> {
+export async function resolveCredentialField(
+  field: string,
+  label: string,
+): Promise<string> {
   try {
-    const key = await resolveCredential(
-      `${CREDENTIAL_SERVICE}/${API_KEY_FIELD}`,
-    );
-    if (key) return key;
+    const value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
+    if (value) return value;
   } catch {
     // Fall through to the actionable message below.
   }
   throw new Error(
-    `Comms API key not found. The credential "${CREDENTIAL_SERVICE}:${API_KEY_FIELD}" must be stored in the credential store. ` +
-      `Run: assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${API_KEY_FIELD} <your_key>`,
+    `${label} is not set. Add it in the iMessage settings app, or run: ` +
+      `assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${field} <value>`,
   );
+}
+
+/** Read the Comms API key. */
+export async function resolveApiKey(): Promise<string> {
+  return resolveCredentialField(API_KEY_FIELD, "The Comms API key");
 }
 
 /**

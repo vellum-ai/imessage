@@ -65,11 +65,40 @@ provider needs. Both paths and plugin boot go through `startChannelRuntime` in
 restarts ingress too: a channel idle for want of a key should come up when the
 key arrives, not when someone remembers to click the provider again.
 
-Re-posting the active provider still bounces its ingress, which is a useful
-recovery for a wedged poll worker, but the app no longer does it on a click.
-Clicking the provider you are already on now just keeps it selected. It used to
-switch-and-restart, which is how someone clicking their own configured provider
-got told the channel was idle.
+**The app follows the assistant's own BYO-service forms** —
+`clients/web/src/components/speech/stt-provider-form.tsx` in vellum-assistant.
+Same shape: title and subtitle, a provider dropdown, that provider's key
+fields, a credentials callout linking to where the key comes from, and a
+right-aligned Save that only lights up when something changed. It cannot import
+that design library (the app is sandboxed, with no access to the host
+stylesheet or its CSS custom properties), so the structure is reproduced
+against system colors. Match that file when changing this app, not the other
+way round.
+
+Picking a provider is a **draft until Save**, which is what the reference form
+does and what keeps a click on the provider you already use from restarting
+your channel. Save writes the provider first and the credentials second: the
+switch restarts ingress on a provider whose key may be missing, and storing the
+key restarts it again — that second pass is the one that comes up. Re-posting
+the active provider still bounces ingress for anyone calling the route
+directly, which stays a useful recovery for a wedged poll worker.
+
+One deliberate divergence: the reference's Reset deletes a stored key. The
+plugin API can only *set* a credential, never remove one, so Reset here reverts
+the form to what is saved rather than pretending to clear the store.
+
+**Display copy lives in the app, field identity on the server.** The routes
+report `{ field, label, placeholder, secret, set }` — enough to draw an input —
+and the app's `PROVIDER_CATALOG` holds the prose: display name, subtitle, and
+where to get the credential. Same split the reference makes.
+
+**A missing `credentials` map is not an empty one.** The app renders
+"the running plugin does not report which credentials this provider needs"
+rather than "this provider needs no credentials", and says so out loud when the
+plugin offers a provider id this build has never heard of. Both mean the panel
+and the running plugin are out of step — usually a bundle newer than the daemon
+— and the honest answer is "reload the plugin", not a form that quietly claims
+Comms needs no API key.
 
 `startChannelRuntime` never throws; it reports a `status`:
 

@@ -30,6 +30,11 @@ export const API_KEY_FIELD = "api_key";
 /**
  * One credential a provider needs, as the settings app renders it.
  *
+ * Field identity only — what it is called and how to draw its input. The
+ * prose around it (what the provider is, where to get a key) is display copy
+ * and lives in the app's provider catalog, mirroring how the assistant's own
+ * provider forms split the two.
+ *
  * `secret: false` is not decoration. A Photon project id is an identifier that
  * appears in its own dashboard URL, and masking it means a user cannot check
  * the value they just pasted against the one on screen. Masking exists for the
@@ -39,7 +44,8 @@ export interface CredentialField {
   /** Field name within the `imessage` credential service. */
   field: string;
   label: string;
-  hint: string;
+  /** Shown in the empty input. Replaced by a masked hint once a value exists. */
+  placeholder: string;
   secret: boolean;
 }
 
@@ -57,22 +63,22 @@ export const PROVIDER_CREDENTIALS: Record<
   comms: [
     {
       field: API_KEY_FIELD,
-      label: "Comms API key",
-      hint: "Messages API key from your Comms by Osis workspace, with the comms_send and comms_read scopes.",
+      label: "API Key",
+      placeholder: "Enter your Comms API key",
       secret: true,
     },
   ],
   photon: [
     {
       field: "photon_project_id",
-      label: "Photon project ID",
-      hint: "From your project in the Photon dashboard. Used as the Basic-auth username.",
+      label: "Project ID",
+      placeholder: "Enter your Photon project ID",
       secret: false,
     },
     {
       field: "photon_project_secret",
-      label: "Photon project secret",
-      hint: "Issued with the project id. Rotate it in the Photon CLI if it leaks.",
+      label: "Project Secret",
+      placeholder: "Enter your Photon project secret",
       secret: true,
     },
   ],

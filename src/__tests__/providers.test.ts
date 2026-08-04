@@ -642,3 +642,50 @@ describe("photon webhook secrets", () => {
     expect(result.secret).toBe("issued-once");
   });
 });
+
+describe("photon chat resolution", () => {
+  test("resolves a handle's chat once and reuses it", async () => {
+    // A long reply is several sends to the same recipient — both the skill
+    // script and the transport chunk — and re-resolving per chunk would be a
+    // round trip per bubble.
+    stubPhoton((call) => {
+      if (call.path.endsWith("/v1/chats")) {
+        return Response.json({
+          chat: { guid: "any;-;+15551234567" },
+          initialMessage: { guid: "p2p-first", isFromMe: true },
+        });
+      }
+      // Everything else but the token mint, which the fixture answers.
+      return call.path.includes("sendText")
+        ? Response.json({ message: { guid: "p2p-next", isFromMe: true } })
+        : undefined;
+    });
+    const provider = createPhotonProvider();
+
+    const first = await provider.send({ to: "+15551234567" }, "one", {
+      idempotencyKey: "a",
+    });
+    const second = await provider.send({ to: "+15551234567" }, "two", {
+      idempotencyKey: "b",
+    });
+
+    expect(first.id).toBe("p2p-first");
+    expect(second.id).toBe("p2p-next");
+    expect(calls.filter((c) => c.path.endsWith("/v1/chats"))).toHaveLength(1);
+    expect(calls.filter((c) => c.path.includes("sendText"))).toHaveLength(1);
+  });
+
+  test("a chat guid target never resolves anything", async () => {
+    stubPhoton((call) =>
+      call.path.includes("sendText")
+        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
+        : undefined,
+    );
+
+    await createPhotonProvider().send({ conversationId: "any;-;+1555" }, "hi", {
+      idempotencyKey: "k",
+    });
+
+    expect(calls.some((c) => c.path.endsWith("/v1/chats"))).toBe(false);
+  });
+});

@@ -16,7 +16,7 @@ import { sendMessage } from "./imessage-client.ts";
 interface Args {
   to: string;
   body: string;
-  channel?: string;
+  channel?: "sms" | "imessage";
 }
 
 function parseArgs(argv: string[]): Args {
@@ -36,12 +36,28 @@ function parseArgs(argv: string[]): Args {
     );
   }
 
-  const channel = flags.get("channel");
-  if (channel && channel !== "sms" && channel !== "imessage") {
+  return { to, body, ...(parseChannel(flags.get("channel")) ?? {}) };
+}
+
+/** Delivery channels `--channel` accepts, as the config field spells them. */
+const CHANNELS = ["sms", "imessage"] as const;
+
+/**
+ * Validate `--channel` into the union the config field uses.
+ *
+ * A `find` over the accepted values rather than a chain of `!==`: narrowing a
+ * `string` by excluding literals leaves it a `string`, and the cast that would
+ * paper over that is the one place a typo could reach the provider.
+ */
+function parseChannel(
+  value: string | undefined,
+): { channel: (typeof CHANNELS)[number] } | undefined {
+  if (value === undefined) return undefined;
+  const channel = CHANNELS.find((candidate) => candidate === value);
+  if (!channel) {
     throw new Error("--channel must be 'sms' or 'imessage'");
   }
-
-  return { to, body, channel };
+  return { channel };
 }
 
 async function main(): Promise<void> {

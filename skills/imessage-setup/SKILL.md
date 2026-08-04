@@ -91,9 +91,9 @@ no restart.
 bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup check from your assistant."
 ```
 
-Have the user confirm it arrived. The script reads `provider` from the plugin's
-`config.json` and sends over whichever line is configured, so this isolates a
-credential problem from an ingress problem on either provider.
+Have the user confirm it arrived. The script sends through the same provider
+adapter the channel uses, over whichever line `config.json` names, so this
+isolates a credential problem from an ingress problem on either provider.
 
 ## 4. Inbound
 

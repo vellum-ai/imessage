@@ -112,25 +112,28 @@ that no longer names it.
 Two callers, one set of rules.
 
 - **The `imessage` skill** (`skills/imessage/`) is how the assistant sends
-  deliberately. `scripts/send.ts` runs as a standalone bun process, so it
-  resolves credentials via `assistant credentials reveal` rather than the
-  in-process credential API, and it reads `provider` out of `config.json` to
-  decide which line to send over. **It speaks both providers, and the wire
-  calls are written twice** — once there against the CLI, once under
-  `src/providers/` against the in-process API. Anything in `src/providers/`
-  imports `@vellumai/plugin-api`, which only resolves inside the daemon, so the
-  script cannot reuse the adapters. Threading a credential seam through every
-  adapter so one client serves both callers is worth doing when a third caller
-  appears; it is not worth it for two. A provider the script does not know
-  throws rather than falling back — sending over a line the user did not
-  configure is the failure that looks like success until someone checks the
-  wrong dashboard.
+  deliberately. `scripts/send.ts` runs as a standalone bun process and **uses
+  the same adapters** — it calls `resolveProvider` and hands the result a
+  chunked body, exactly as the transport does. There is no provider-specific
+  code in the skill, so a new provider is never something anyone has to teach
+  it.
+
+  That works because `@vellumai/plugin-api` resolves to the **workspace shim**
+  the daemon materializes (`ensurePluginApiShim`), which prefers the namespace a
+  host parked on `globalThis` and falls back to importing the plugin-api source
+  directly when no host did — credentials being one of the surfaces that
+  fallback exists for. The installer also strips the `@vellumai/plugin-api`
+  peer for the duration of `bun install` so a registry copy cannot shadow that
+  shim. Both halves matter: without the strip, a plugin-local copy of the
+  published package resolves first, and the published package has no fallback,
+  so every export is `undefined` in a subprocess.
 - **The channel transport** (`src/channel/transport.ts`) is how a reply goes
   back out once the host's inbound pipeline exists.
 
-Both import `src/channel/render.ts`, which is dependency-free for exactly that
-reason: a skill-script send and a channel reply must format identically, and two
-copies of the rules would drift.
+Both go through `src/channel/render.ts` for chunking and idempotency keys, and
+both normalize a recipient through `src/channel/identity.ts`: a skill send and
+a channel reply have to format identically and address the same person the same
+way, and two copies of either rule would drift.
 
 **Long replies are chunked, never truncated.** An earlier version cut at the
 limit and appended an ellipsis, which silently dropped the end of every long

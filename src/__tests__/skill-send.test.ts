@@ -1,39 +1,40 @@
 /**
  * The `imessage` skill's standalone send path.
  *
- * This is the assistant's deliberate-send route, and it now has to speak
- * whichever provider is configured — which since Photon became the default
- * means the default install exercises the Photon path.
+ * It runs the plugin's own provider adapters from a separate process, which is
+ * the thing worth pinning: `resolveCredential` is mocked here the same way the
+ * provider tests mock it, and a send comes out the other side as real provider
+ * wire calls rather than as a second copy of them.
  *
- * `node:child_process` is mocked so no credential is revealed and no `assistant`
- * binary is required; `fetch` is stubbed so nothing leaves the process. There is
- * no `config.json` in the repo, so `configuredProvider()` falls through to its
- * default, which is exactly the case under test.
+ * There is no `config.json` in the repo, so `readConfigView` answers with the
+ * schema's defaults — meaning these exercise the default provider, which is the
+ * path a fresh install takes.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-const realChildProcess = await import("node:child_process");
+const realPluginApi = await import("@vellumai/plugin-api");
 
-/** Credential values by field, as `assistant credentials reveal` would print. */
+/** Credential values by field, as the store would answer. */
 const credentials: Record<string, string> = {
   photon_project_id: "proj_1",
   photon_project_secret: "shh",
   api_key: "sk-comms",
 };
 
-mock.module("node:child_process", () => ({
-  ...realChildProcess,
-  execFileSync: (_file: string, args: string[]) => {
-    const field = args[args.indexOf("--field") + 1] ?? "";
-    return `${credentials[field] ?? ""}\n`;
-  },
+mock.module("@vellumai/plugin-api", () => ({
+  ...realPluginApi,
+  resolveCredential: mock(async (ref: string) => {
+    const field = ref.split("/")[1] ?? "";
+    const value = credentials[field];
+    if (!value) throw new Error(`no credential for ${ref}`);
+    return value;
+  }),
 }));
 
-const { sendMessage, DEFAULT_PROVIDER } = await import(
+const { sendMessage, normalizeRecipient } = await import(
   "../../skills/imessage/scripts/imessage-client.ts"
 );
-const { IMessageConfigSchema } = await import("../config.ts");
 
 interface Call {
   url: string;
@@ -43,8 +44,12 @@ interface Call {
 const originalFetch = globalThis.fetch;
 let calls: Call[] = [];
 
+/** The Photon wire: mint a token, resolve a chat, then send into it. */
 function stubPhotonWire(): void {
-  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = (async (
+    url: string | URL | Request,
+    init?: RequestInit,
+  ) => {
     const href = String(url);
     calls.push({ url: href, init: init ?? {} });
 
@@ -55,14 +60,19 @@ function stubPhotonWire(): void {
       });
     }
     if (href.endsWith("/v1/chats")) {
-      return Response.json({ chat: { guid: "any;-;+15551234567" } });
+      return Response.json({
+        chat: { guid: "any;-;+15551234567" },
+        initialMessage: { guid: "p2p-first", isFromMe: true },
+      });
     }
-    return Response.json({ message: { guid: `p2p-${calls.length}` } });
-  }) as typeof fetch;
+    return Response.json({
+      message: { guid: `p2p-${calls.length}`, isFromMe: true },
+    });
+  }) as unknown as typeof fetch;
 }
 
-function headersOf(call: Call | undefined): Record<string, string> {
-  return (call?.init.headers ?? {}) as Record<string, string>;
+function pathsCalled(): string[] {
+  return calls.map((call) => new URL(call.url).pathname);
 }
 
 beforeEach(() => {
@@ -74,44 +84,36 @@ afterEach(() => {
 });
 
 describe("skill send", () => {
-  test("its default provider matches the config schema's", () => {
-    // The script reads `config.json` directly rather than through the schema,
-    // so the fallback is stated twice. Two defaults that disagree means the
-    // script sends over a different line than the channel does.
-    expect(DEFAULT_PROVIDER).toBe(IMessageConfigSchema.parse({}).provider);
-  });
-
-  test("sends over Photon: mint, open the chat, then send", async () => {
+  test("goes out over the configured provider's adapter", async () => {
+    // The script picks no provider of its own: `resolveProvider` answers, the
+    // same way it does for the channel transport.
     stubPhotonWire();
     const sent = await sendMessage({ to: "+15551234567", body: "hello" });
 
-    expect(sent.map((chunk) => chunk.body)).toEqual(["hello"]);
-    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+    expect(sent).toEqual([{ id: "p2p-first", body: "hello" }]);
+    expect(pathsCalled()).toEqual([
       "/projects/proj_1/imessage/tokens",
       "/v1/chats",
-      "/v1/messages:sendText",
     ]);
-
-    // The control plane takes the project pair; the message plane takes the
-    // token minted from it.
-    expect(headersOf(calls[0]).Authorization).toBe(
-      `Basic ${btoa("proj_1:shh")}`,
-    );
-    expect(headersOf(calls[2]).Authorization).toBe("Bearer tok_live");
   });
 
-  test("opens the chat once, then sends every chunk into it", async () => {
-    // Re-minting between chunks would leave the recipient with half a reply if
-    // a credential prompt or a token failure landed mid-send.
+  test("resolves the chat once, then sends every chunk into it", async () => {
+    // Re-resolving per chunk would be a round trip per bubble on every long
+    // reply.
     stubPhotonWire();
-    const long = "word ".repeat(700);
-    const sent = await sendMessage({ to: "+15551234567", body: long });
+    const sent = await sendMessage({
+      to: "+15551234567",
+      body: "word ".repeat(700),
+    });
 
     expect(sent.length).toBeGreaterThan(1);
-    expect(calls.filter((c) => c.url.includes("/imessage/tokens"))).toHaveLength(
-      1,
-    );
     expect(calls.filter((c) => c.url.endsWith("/v1/chats"))).toHaveLength(1);
+    expect(
+      calls.filter((c) => c.url.includes("/imessage/tokens")),
+    ).toHaveLength(1);
+    expect(calls.filter((c) => c.url.includes("sendText")).length).toBe(
+      sent.length - 1,
+    );
   });
 
   test("every chunk carries its own idempotency key", async () => {
@@ -120,14 +122,17 @@ describe("skill send", () => {
     stubPhotonWire();
     await sendMessage({ to: "+15551234567", body: "word ".repeat(700) });
 
-    const sends = calls.filter((c) => c.url.includes("sendText"));
-    const keys = sends.map((c) => headersOf(c)["x-idempotency-key"]);
+    const keys = calls
+      .filter((c) => c.url.includes("sendText"))
+      .map(
+        (c) => (c.init.headers as Record<string, string>)["x-idempotency-key"],
+      );
 
     expect(keys.every(Boolean)).toBe(true);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  test("a refused token names the credentials rather than the endpoint", async () => {
+  test("a provider failure surfaces the provider's own reason", async () => {
     globalThis.fetch = (async () =>
       Response.json({
         succeed: false,
@@ -139,8 +144,10 @@ describe("skill send", () => {
     ).rejects.toThrow(/invalid credentials/);
   });
 
-  test("nothing is sent when the chat cannot be resolved", async () => {
-    // Reporting a delivery that did not happen is the worst outcome here.
+  test("partial delivery is reported, never hidden", async () => {
+    // The recipient already has the earlier chunks; the assistant has to know
+    // how many landed.
+    let sends = 0;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const href = String(url);
       if (href.includes("/imessage/tokens")) {
@@ -149,11 +156,38 @@ describe("skill send", () => {
           data: { type: "shared", token: "tok_live" },
         });
       }
-      return Response.json({});
+      if (href.endsWith("/v1/chats")) {
+        return Response.json({
+          chat: { guid: "any;-;+1555" },
+          initialMessage: { guid: "p2p-first", isFromMe: true },
+        });
+      }
+      sends++;
+      // 400, not 500: a 5xx is retryable, so the client would back off three
+      // times before the failure this test is about.
+      return sends === 1
+        ? Response.json({ message: { guid: "p2p-2", isFromMe: true } })
+        : new Response("nope", { status: 400 });
     }) as unknown as typeof fetch;
 
     await expect(
-      sendMessage({ to: "+15551234567", body: "hi" }),
-    ).rejects.toThrow(/no chat guid/);
+      sendMessage({ to: "+15551234567", body: "word ".repeat(700) }),
+    ).rejects.toThrow(/Sent \d+ of \d+ messages, then failed/);
+  });
+
+  test("an unaddressable recipient is refused before anything is sent", async () => {
+    stubPhotonWire();
+
+    await expect(sendMessage({ to: "12345", body: "hi" })).rejects.toThrow(
+      /not a recipient/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test("normalizes a recipient the way the channel does", () => {
+    // One normalizer for skill sends and inbound turns, or the same person
+    // becomes two contacts.
+    expect(normalizeRecipient("(555) 123-4567")).toBe("+15551234567");
+    expect(normalizeRecipient("+1 555 123 4567")).toBe("+15551234567");
   });
 });

@@ -2,10 +2,9 @@
  * `POST /webhooks/plugins/imessage/events-comms` — deliveries from a Comms
  * line.
  *
- * Comms documents no signature and issues no signing secret, so this route is
- * declared in `channels/ingress.json` as `shared-secret`: the gateway compares
- * a token this plugin minted and registered in the URL. The handler never sees
- * an unverified delivery.
+ * Comms signs with `X-Osis-Signature: sha256=<hex>` over the raw body, which
+ * `channels/ingress.json` describes to the gateway as an `hmac` route. The
+ * handler never sees an unverified delivery.
  */
 
 import { handleProviderWebhook } from "../src/webhook-route.ts";

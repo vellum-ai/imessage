@@ -13,9 +13,9 @@
  *    delivery is always read by the adapter that understands it.
  *
  * The gateway authenticates the delivery before this handler runs: signature
- * or shared-secret verification, body-size limits, and rate limiting are all
- * its job, and re-implementing them here would mean two schemes to keep in
- * sync and one to get subtly wrong.
+ * verification, body-size limits, and rate limiting are all its job, and
+ * re-implementing them here would mean two schemes to keep in sync and one to
+ * get subtly wrong.
  */
 
 import { isAllowedHandle } from "./config.ts";

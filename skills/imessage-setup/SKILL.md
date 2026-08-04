@@ -150,6 +150,13 @@ cannot be added.
 rejects provider deliveries (see step 4). Switch to poll. In poll mode, check
 that the key carries `comms_read`.
 
+**Checking inbound without waiting for a text** — on Comms, `POST
+/api/v1/comms/webhooks/{id}/test` sends a signed `comms.ping` through the real
+delivery pipeline (same envelope, same signature). A 403 at the gateway means
+verification is not implemented for the route's descriptor yet; a 200 with
+`ignored: "not an inbound message"` in the plugin's logs means the whole path
+works and a ping is simply not a turn.
+
 **Messages sent before setup do not appear** — expected. The channel starts from
 the moment of setup rather than replaying history.
 

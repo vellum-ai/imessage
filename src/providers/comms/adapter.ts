@@ -10,8 +10,8 @@ import { CommsClient } from "./client.ts";
 import { normalizeCommsMessage, normalizeWebhookEvent } from "./normalize.ts";
 import {
   COMMS_INBOUND_EVENT,
-  CommsWebhookSchema,
   createdAtOf,
+  webhookFromCreate,
   webhookUrlOf,
   webhooksFromListing,
 } from "./schemas.ts";
@@ -76,11 +76,10 @@ export function createCommsProvider(
      * would deliver our own replies straight back, and the normalizer would
      * drop every one of them — traffic and log noise for nothing.
      *
-     * Comms issues no signing secret and documents no signature, so the URL
-     * already carries the shared token the gateway checks. Matching on the
-     * full URL therefore also matches on the token: rotate it and this
-     * registers the new URL rather than reusing a registration the gateway
-     * would now reject.
+     * The signing secret comes back from both the create and the listing, so
+     * an existing registration hands its secret over rather than being torn
+     * down: `opts.hasSecret` is deliberately unused here. A lost secret is a
+     * `GET` away, and re-registering would change the webhook id for nothing.
      */
     async ensureWebhook(
       opts: EnsureWebhookOptions,
@@ -88,15 +87,14 @@ export function createCommsProvider(
       const existing = webhooksFromListing(await client.listWebhooks()).find(
         (hook) => webhookUrlOf(hook) === opts.url,
       );
-      if (existing) return { created: false, id: existing.id };
+      if (existing) {
+        return { created: false, id: existing.id, secret: existing.secret };
+      }
 
-      const created = await client.createWebhook(opts.url, [
-        COMMS_INBOUND_EVENT,
-      ]);
-      return {
-        created: true,
-        id: CommsWebhookSchema.safeParse(created).data?.id,
-      };
+      const created = webhookFromCreate(
+        await client.createWebhook(opts.url, [COMMS_INBOUND_EVENT]),
+      );
+      return { created: true, id: created?.id, secret: created?.secret };
     },
 
     async send(

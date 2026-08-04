@@ -44,29 +44,9 @@ export function ingressRoutePath(provider: ProviderId): string {
   return `events-${provider}`;
 }
 
-/**
- * Query parameter carrying the shared secret on providers that do not sign.
- *
- * Comms documents no signature scheme and returns no signing secret, so the
- * only thing that can prove a delivery came from the line we registered is a
- * token we minted and put in the URL. The gateway compares it in constant
- * time; `channels/ingress.json` names both the parameter and the credential.
- */
-export const SHARED_SECRET_PARAM = "token";
-
 export type WebhookEndpoint =
   | { ok: true; url: string }
   | { ok: false; reason: string };
-
-export interface WebhookEndpointOptions {
-  /** Provider the route is for. Becomes the last path segment. */
-  provider: ProviderId;
-  /**
-   * Shared secret to carry in the query, for a provider that cannot sign.
-   * Omitted for providers whose deliveries are verified by signature.
-   */
-  sharedSecret?: string;
-}
 
 /** `<workspaceDir>/config.json`, the assistant's own config. */
 function readWorkspaceConfig(): Record<string, unknown> {
@@ -85,9 +65,7 @@ function readWorkspaceConfig(): Record<string, unknown> {
 }
 
 /** The absolute URL a provider posts deliveries to, or why there is not one. */
-export function resolveWebhookEndpoint(
-  opts: WebhookEndpointOptions,
-): WebhookEndpoint {
+export function resolveWebhookEndpoint(provider: ProviderId): WebhookEndpoint {
   const ingress = readWorkspaceConfig().ingress;
   const base =
     ingress && typeof ingress === "object"
@@ -102,12 +80,8 @@ export function resolveWebhookEndpoint(
     };
   }
 
-  const url = new URL(
-    `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${ingressRoutePath(opts.provider)}`,
-  );
-  if (opts.sharedSecret) {
-    url.searchParams.set(SHARED_SECRET_PARAM, opts.sharedSecret);
-  }
-
-  return { ok: true, url: url.toString() };
+  return {
+    ok: true,
+    url: `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${ingressRoutePath(provider)}`,
+  };
 }

@@ -14,7 +14,7 @@
 import { readSecret, storeSecret } from "./app-credentials.ts";
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
-import { WEBHOOK_SECRET_FIELDS, WEBHOOK_VERIFICATION } from "./config.ts";
+import { WEBHOOK_SECRET_FIELDS } from "./config.ts";
 import type { RuntimeContext } from "./plugin-state.ts";
 import {
   getInitContext,
@@ -70,20 +70,7 @@ async function registerWebhook(
 
   try {
     const held = await readSecret(secretField);
-
-    // A provider that cannot sign gets a token this plugin mints, carried in
-    // the registered URL. Minting before composing the URL is what makes the
-    // URL and the stored token one fact rather than two that have to agree.
-    let sharedSecret: string | undefined;
-    if (WEBHOOK_VERIFICATION[provider.id] === "shared-secret") {
-      sharedSecret = held ?? randomToken();
-      if (!held) await storeSecret(secretField, sharedSecret);
-    }
-
-    const endpoint = resolveWebhookEndpoint({
-      provider: provider.id,
-      sharedSecret,
-    });
+    const endpoint = resolveWebhookEndpoint(provider.id);
     if (!endpoint.ok) {
       logger.warn(
         { provider: provider.id, reason: endpoint.reason },
@@ -97,9 +84,13 @@ async function registerWebhook(
       hasSecret: Boolean(held),
     });
 
-    // Store before reporting success: a secret issued once and dropped leaves
-    // a registration whose deliveries nothing can verify.
-    if (result.secret) await storeSecret(secretField, result.secret);
+    // Store before reporting success: a secret dropped here leaves a
+    // registration whose deliveries nothing can verify. Providers hand one
+    // back on every registration they can — Photon only when it creates,
+    // Comms whenever asked — so this runs whether or not anything was created.
+    if (result.secret && result.secret !== held) {
+      await storeSecret(secretField, result.secret);
+    }
 
     logger.info(
       { provider: provider.id, created: result.created },
@@ -116,13 +107,6 @@ async function registerWebhook(
       "imessage: could not register the inbound webhook — the channel is running but will not hear anything",
     );
   }
-}
-
-/** A shared secret with enough entropy to be a credential on its own. */
-function randomToken(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
 }
 
 /**

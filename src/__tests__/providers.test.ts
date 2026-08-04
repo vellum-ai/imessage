@@ -466,21 +466,68 @@ describe("photon provider", () => {
 });
 
 describe("webhook registration", () => {
-  test("comms registers for message.received only", async () => {
+  test("comms registers for message.received only, and keeps the secret", async () => {
     // Registering for message.sent would deliver our own replies back, and the
-    // normalizer would drop every one of them.
-    stubFetch(() => Response.json({ webhooks: [] }));
+    // normalizer would drop every one of them. The `whsec_` secret comes back
+    // from the 201 wrapped as `{ webhook }` — reading it out of the wrong
+    // nesting stores nothing and fails every later verification.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({ webhooks: [] })
+        : Response.json({
+            webhook: {
+              id: "wh_1",
+              url: "https://host.example/events-comms",
+              secret: "whsec_abc",
+            },
+          }),
+    );
+
     const result = await createCommsProvider().ensureWebhook({
-      url: "https://host.example/webhooks/plugins/imessage/events-comms?token=t",
-      hasSecret: true,
+      url: "https://host.example/events-comms",
+      hasSecret: false,
     });
 
-    expect(result.created).toBe(true);
+    expect(result).toEqual({
+      created: true,
+      id: "wh_1",
+      secret: "whsec_abc",
+    });
     expect(calls.map((c) => c.init.method)).toEqual(["GET", "POST"]);
     expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
-      url: "https://host.example/webhooks/plugins/imessage/events-comms?token=t",
+      url: "https://host.example/events-comms",
       events: ["comms.message.received"],
     });
+  });
+
+  test("comms re-reads a lost secret instead of re-registering", async () => {
+    // The listing carries the secret, so a registration never has to be torn
+    // down to recover one — unlike Photon, where it is issued exactly once.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({
+            webhooks: [
+              {
+                id: "wh_2",
+                url: "https://host.example/mine",
+                secret: "whsec_recovered",
+              },
+            ],
+          })
+        : Response.json({}),
+    );
+
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
+
+    expect(result).toEqual({
+      created: false,
+      id: "wh_2",
+      secret: "whsec_recovered",
+    });
+    expect(calls).toHaveLength(1);
   });
 
   test("comms does not re-register an existing url", async () => {
@@ -502,7 +549,8 @@ describe("webhook registration", () => {
       hasSecret: true,
     });
 
-    expect(result).toEqual({ created: false, id: "wh_2" });
+    expect(result.created).toBe(false);
+    expect(result.id).toBe("wh_2");
     expect(calls).toHaveLength(1);
   });
 
@@ -519,7 +567,7 @@ describe("webhook registration", () => {
         url: "https://host.example/mine",
         hasSecret: true,
       }),
-    ).toEqual({ created: false, id: "wh_9" });
+    ).toMatchObject({ created: false, id: "wh_9" });
   });
 
   test("photon registers through the control plane", async () => {

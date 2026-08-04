@@ -87,8 +87,8 @@ export const PROVIDER_CREDENTIALS: Record<
 /**
  * Where each provider's inbound-webhook secret is stored.
  *
- * Not in `PROVIDER_CREDENTIALS`: nobody types these. They are minted or issued
- * during webhook registration, and the settings app must not offer a field for
+ * Not in `PROVIDER_CREDENTIALS`: nobody types these. Both providers issue one
+ * during webhook registration, so the settings app must not offer a field for
  * a value the user has no way to know.
  *
  * The gateway reads the same credential when it verifies a delivery — the
@@ -98,31 +98,7 @@ export const PROVIDER_CREDENTIALS: Record<
  */
 export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
   photon: "photon_webhook_secret",
-  comms: "comms_webhook_token",
-};
-
-/**
- * How the gateway verifies each provider's deliveries.
- *
- * - `hmac` — the provider signs, and the route's descriptor says with what.
- * - `shared-secret` — the provider does not sign, so the plugin mints a token
- *   and registers it in the URL for the gateway to compare.
- *
- * Comms is `shared-secret` because it documents no signature and issues no
- * signing secret: `POST /webhooks` takes `{ url, events }` and returns
- * `{ id, url, events }`. A token in the URL is the only thing that can
- * distinguish its deliveries from anyone else's POST.
- *
- * This has to agree with `channels/ingress.json`, which is what the gateway
- * actually reads. `src/__tests__/ingress-manifest.test.ts` holds the two
- * together.
- */
-export const WEBHOOK_VERIFICATION: Record<
-  ProviderId,
-  "hmac" | "shared-secret"
-> = {
-  photon: "hmac",
-  comms: "shared-secret",
+  comms: "comms_webhook_secret",
 };
 
 /**

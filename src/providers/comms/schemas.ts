@@ -142,22 +142,46 @@ export function isInboundMessageEvent(event: WebhookEvent): boolean {
 }
 
 /**
- * A registered webhook, as `GET /webhooks` reports it.
+ * A registered webhook.
  *
- * The docs give `POST /webhooks` its request shape (`{ url, events }`) but not
- * what a listing returns, so the url is accepted under several spellings.
- * Getting this wrong means `ensureWebhook` never matches an existing
- * registration and registers a duplicate on every start, which is why the
- * candidates are wide rather than a single guess.
+ * `secret` (`whsec_…`) is the HMAC key Comms signs deliveries with. It comes
+ * back from `POST /webhooks` **and** from `GET /webhooks`, which is the useful
+ * difference from Photon: a lost secret is re-readable, so a registration never
+ * has to be torn down to recover one.
+ *
+ * The url is accepted under several spellings. Getting it wrong means
+ * `ensureWebhook` never matches an existing registration and registers a
+ * duplicate on every start, so the candidates are wide rather than a single
+ * guess.
  */
 export const CommsWebhookSchema = z.looseObject({
   id: softString,
   url: softString,
   webhook_url: softString,
   webhookUrl: softString,
+  secret: softString,
   events: z.array(z.string()).optional().catch(undefined),
 });
 export type CommsWebhook = z.infer<typeof CommsWebhookSchema>;
+
+/** `POST /webhooks`, whose 201 wraps the created object. */
+export const CreateWebhookResponseSchema = z.looseObject({
+  webhook: CommsWebhookSchema,
+});
+
+/**
+ * The created webhook out of the 201.
+ *
+ * The documented response wraps it as `{ webhook }`; a bare object is accepted
+ * as a fallback because reading the secret out of the wrong nesting means
+ * storing nothing and failing every later verification with a registration
+ * that looks fine.
+ */
+export function webhookFromCreate(raw: unknown): CommsWebhook | undefined {
+  const wrapped = CreateWebhookResponseSchema.safeParse(raw);
+  if (wrapped.success) return wrapped.data.webhook;
+  return CommsWebhookSchema.safeParse(raw).data;
+}
 
 /** `GET /webhooks`, which may answer with a bare array or a wrapped one. */
 export const ListWebhooksResponseSchema = z.union([

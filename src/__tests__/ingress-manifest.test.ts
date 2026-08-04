@@ -16,16 +16,10 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
-import {
-  WEBHOOK_SECRET_FIELDS,
-  WEBHOOK_VERIFICATION,
-} from "../config.ts";
+import { WEBHOOK_SECRET_FIELDS } from "../config.ts";
 import type { ProviderId } from "../providers/types.ts";
 import { PROVIDER_IDS } from "../providers/types.ts";
-import {
-  ingressRoutePath,
-  SHARED_SECRET_PARAM,
-} from "../webhook-endpoint.ts";
+import { ingressRoutePath } from "../webhook-endpoint.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -82,23 +76,18 @@ describe("ingress manifest", () => {
     }
   });
 
-  test("each route's verification kind matches what the runtime does", () => {
-    // `shared-secret` means the runtime mints a token and puts it in the URL.
-    // Declaring `hmac` for such a provider would have the gateway look for a
-    // signature nobody sends.
+  test("every route is verified by signature", () => {
+    // Both vendors sign, so nothing here should be relying on a secret carried
+    // in the URL — that is a bearer credential sitting in a provider dashboard
+    // and in every access log along the way.
     for (const provider of PROVIDER_IDS) {
-      expect(routeFor(provider)?.verification?.kind).toBe(
-        WEBHOOK_VERIFICATION[provider],
-      );
+      const verification = routeFor(provider)?.verification;
+      expect(verification?.kind).toBe("hmac");
+      expect(verification?.carrier).toBeUndefined();
     }
   });
 
-  test("the shared-secret route carries the token the runtime appends", () => {
-    const comms = routeFor("comms");
-    expect(comms?.verification?.carrier?.query).toBe(SHARED_SECRET_PARAM);
-  });
-
-  test("the hmac route describes Photon's documented scheme", () => {
+  test("Photon's route describes its documented scheme", () => {
     // `HMAC-SHA256(secret, "v0:" + timestamp + ":" + rawBody)`, hex, sent as
     // `X-Spectrum-Signature: v0=<hex>` with a five-minute tolerance.
     const photon = routeFor("photon")?.verification;
@@ -119,6 +108,22 @@ describe("ingress manifest", () => {
       header: "X-Spectrum-Timestamp",
       toleranceSeconds: 300,
     });
+  });
+
+  test("Comms' route describes its documented scheme", () => {
+    // `HMAC-SHA256(secret, rawBody)`, hex, sent as
+    // `X-Osis-Signature: sha256=<hex>`. The body alone is what is signed —
+    // there is no timestamp header to bind, so no freshness window either.
+    const comms = routeFor("comms")?.verification;
+
+    expect(comms?.algorithm).toBe("sha256");
+    expect(comms?.signature).toMatchObject({
+      header: "X-Osis-Signature",
+      encoding: "hex",
+      prefix: "sha256=",
+    });
+    expect(comms?.payload).toEqual(["body"]);
+    expect(comms?.freshness).toBeUndefined();
   });
 
   test("every route is http and carries a description", () => {

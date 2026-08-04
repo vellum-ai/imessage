@@ -173,23 +173,32 @@ Each route carries a `verification` descriptor saying how the gateway should
 check a delivery — algorithm, which credential field holds the secret, where
 the signature is, and exactly which bytes it covers. The manifest is the spec:
 it is declarative on purpose, so a third vendor is a manifest edit rather than
-gateway code. Two kinds exist because the two vendors need both — `hmac` for
-one that signs, `shared-secret` for one that does not.
+gateway code.
 
-The two providers need different answers, which is why the descriptor is data:
+Both providers sign, and they sign differently — which is the whole reason the
+descriptor is data rather than a scheme name:
 
 - **Photon** signs `HMAC-SHA256(secret, "v0:" + timestamp + ":" + rawBody)` and
-  sends it as `X-Spectrum-Signature: v0=<hex>` with `X-Spectrum-Timestamp` and
-  a five-minute tolerance. The secret is issued **once**, from
+  sends it as `X-Spectrum-Signature: v0=<hex>`, with `X-Spectrum-Timestamp` and
+  a five-minute tolerance. Its secret is issued **once**, from
   `POST /projects/{id}/webhooks/`, and never appears in a listing — so
   registration stores it immediately, and a registration whose secret was lost
   is deleted and recreated rather than reused. A webhook nothing can verify is
   worse than no webhook.
-- **Comms** documents no signature and issues no signing secret at all. So the
-  plugin mints a 256-bit token, stores it, and registers a URL carrying it;
-  the gateway compares it in constant time. Weaker than an HMAC, and the URL is
-  a bearer credential — but the alternatives are an unsigned public endpoint or
-  no webhook support for that vendor.
+- **Comms** signs `HMAC-SHA256(secret, rawBody)` — the body alone — and sends it
+  as `X-Osis-Signature: sha256=<hex>`, alongside `X-Osis-Event`. Its `whsec_`
+  secret comes back from the create **and** from `GET /webhooks`, so a lost one
+  is re-readable and an existing registration is never torn down to recover it.
+
+**Comms has no replay window.** Nothing in its signature binds a timestamp, so a
+captured delivery stays valid indefinitely; Photon's five-minute tolerance is
+the reason its descriptor carries `freshness` and Comms' does not. Deduplicating
+on message id is what bounds the damage, and that belongs to the host's inbound
+pipeline rather than here.
+
+Both are HMAC over raw bytes, so **the gateway must hash the body it received**,
+before any parse. A re-serialized JSON body does not match, and the failure
+looks like a wrong secret.
 
 Both secrets live in the credential store under `WEBHOOK_SECRET_FIELDS`
 (`src/config.ts`), never in `PROVIDER_CREDENTIALS` — nobody types them, and the

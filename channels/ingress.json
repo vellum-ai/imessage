@@ -39,13 +39,19 @@
       "kind": "http",
       "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received).",
       "verification": {
-        "kind": "shared-secret",
+        "kind": "hmac",
+        "algorithm": "sha256",
         "secret": {
-          "field": "comms_webhook_token"
+          "field": "comms_webhook_secret"
         },
-        "carrier": {
-          "query": "token"
-        }
+        "signature": {
+          "header": "X-Osis-Signature",
+          "encoding": "hex",
+          "prefix": "sha256="
+        },
+        "payload": [
+          "body"
+        ]
       }
     }
   ]

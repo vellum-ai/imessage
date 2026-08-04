@@ -80,12 +80,12 @@ afterEach(() => {
 });
 
 describe("provider registry", () => {
-  test("comms is the default", () => {
-    // Bring-your-own is the shipping path: a platform-provided line is priced
-    // per line by every vendor that sells one.
+  test("photon is the default", () => {
+    // Bring-your-own is the shipping path either way; Photon is the more
+    // mature of the two lines.
     const config = IMessageConfigSchema.parse({});
-    expect(config.provider).toBe("comms");
-    expect(resolveProvider({ config }).id).toBe("comms");
+    expect(config.provider).toBe("photon");
+    expect(resolveProvider({ config }).id).toBe("photon");
   });
 
   test("knows both providers", () => {
@@ -471,14 +471,14 @@ describe("webhook registration", () => {
     // normalizer would drop every one of them.
     stubFetch(() => Response.json({ webhooks: [] }));
     const result = await createCommsProvider().ensureWebhook({
-      url: "https://host.example/webhooks/plugins/imessage/events/comms?token=t",
+      url: "https://host.example/webhooks/plugins/imessage/events-comms?token=t",
       hasSecret: true,
     });
 
     expect(result.created).toBe(true);
     expect(calls.map((c) => c.init.method)).toEqual(["GET", "POST"]);
     expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
-      url: "https://host.example/webhooks/plugins/imessage/events/comms?token=t",
+      url: "https://host.example/webhooks/plugins/imessage/events-comms?token=t",
       events: ["comms.message.received"],
     });
   });

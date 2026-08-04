@@ -45,10 +45,10 @@ describe("resolveWebhookEndpoint", () => {
     const photon = resolveWebhookEndpoint({ provider: "photon" });
 
     expect(comms.ok && comms.url).toBe(
-      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events/comms`,
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-comms`,
     );
     expect(photon.ok && photon.url).toBe(
-      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events/photon`,
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-photon`,
     );
   });
 
@@ -61,7 +61,7 @@ describe("resolveWebhookEndpoint", () => {
     });
 
     expect(endpoint.ok && endpoint.url).toBe(
-      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events/comms?token=tok-abc`,
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-comms?token=tok-abc`,
     );
   });
 

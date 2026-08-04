@@ -8,13 +8,14 @@
  * Two providers, both bring-your-own — the user holds the account and the
  * billing either way:
  *
- * - `comms` (default) — a Comms by Osis workspace, API key, and line. One
- *   REST API for both directions.
- * - `photon` — a Photon (Spectrum) project. Two planes rather than one: a
- *   control plane at `spectrum.photon.codes` authenticated with the project
- *   id and secret, and a message plane at `imessage.spectrum.photon.codes`
- *   authenticated with a short-lived token minted from it. The adapter owns
- *   that dance; nothing above this seam knows there are two hosts.
+ * - `photon` (default) — a Photon (Spectrum) project. Two planes rather than
+ *   one: a control plane at `spectrum.photon.codes` authenticated with the
+ *   project id and secret, and a message plane at
+ *   `imessage.spectrum.photon.codes` authenticated with a short-lived token
+ *   minted from it. The adapter owns that dance; nothing above this seam knows
+ *   there are two hosts.
+ * - `comms` — a Comms by Osis workspace, API key, and line. One REST API for
+ *   both directions.
  *
  * The seam also earns its keep independently of the entry count: no official
  * iMessage API exists, every vendor runs a macOS fleet under a
@@ -25,7 +26,7 @@
 
 import type { PluginInboundEvent } from "../channel/contract.ts";
 
-export const PROVIDER_IDS = ["comms", "photon"] as const;
+export const PROVIDER_IDS = ["photon", "comms"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /** Where an outbound message is addressed. */

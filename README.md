@@ -19,14 +19,15 @@ You supply the line, from either of two providers:
 
 | Provider | You need | Where |
 | --- | --- | --- |
-| **Comms by Osis** (default) | A Messages API key | [comms.osis.co](https://comms.osis.co) |
-| **Photon** | A project ID and project secret | [photon.codes](https://photon.codes) |
+| **Photon** (default) | A project ID and project secret | [photon.codes](https://photon.codes) |
+| **Comms by Osis** | A Messages API key | [comms.osis.co](https://comms.osis.co) |
 
 Pick the provider and fill in its credentials in the plugin's settings app, or
 store them from a terminal:
 
 ```bash
-assistant credentials set --service imessage --field api_key <key>
+assistant credentials set --service imessage --field photon_project_id <id>
+assistant credentials set --service imessage --field photon_project_secret <secret>
 ```
 
 Bringing your own is the only option. A provider-neutral line from us is not on

@@ -20,8 +20,12 @@ import {
   WEBHOOK_SECRET_FIELDS,
   WEBHOOK_VERIFICATION,
 } from "../config.ts";
+import type { ProviderId } from "../providers/types.ts";
 import { PROVIDER_IDS } from "../providers/types.ts";
-import { INGRESS_ROUTE_PREFIX, SHARED_SECRET_PARAM } from "../webhook-endpoint.ts";
+import {
+  ingressRoutePath,
+  SHARED_SECRET_PARAM,
+} from "../webhook-endpoint.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -44,9 +48,9 @@ const manifest = JSON.parse(
   readFileSync(join(ROOT, "channels", "ingress.json"), "utf8"),
 ) as { routes: ManifestRoute[] };
 
-function routeFor(provider: string): ManifestRoute | undefined {
+function routeFor(provider: ProviderId): ManifestRoute | undefined {
   return manifest.routes.find(
-    (route) => route.path === `${INGRESS_ROUTE_PREFIX}/${provider}`,
+    (route) => route.path === ingressRoutePath(provider),
   );
 }
 

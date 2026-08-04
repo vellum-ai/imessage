@@ -1,5 +1,5 @@
 /**
- * `POST /webhooks/plugins/imessage/events/comms` — deliveries from a Comms
+ * `POST /webhooks/plugins/imessage/events-comms` — deliveries from a Comms
  * line.
  *
  * Comms documents no signature and issues no signing secret, so this route is
@@ -8,7 +8,7 @@
  * an unverified delivery.
  */
 
-import { handleProviderWebhook } from "../../src/webhook-route.ts";
+import { handleProviderWebhook } from "../src/webhook-route.ts";
 
 export async function POST(request: Request): Promise<Response> {
   return handleProviderWebhook("comms", request);

@@ -1,8 +1,8 @@
 /**
  * The public URL a provider should deliver webhooks to.
  *
- * **One route per provider**, not one shared route: `events/comms` and
- * `events/photon`. Which provider signed a delivery decides how it must be
+ * **One route per provider**, not one shared route: `events-photon` and
+ * `events-comms`. Which provider signed a delivery decides how it must be
  * verified, and the gateway only reads its own static manifest — so the
  * provider has to be identifiable from the path rather than from this plugin's
  * config. Encoding it in the URL is what keeps the gateway's side static while
@@ -32,8 +32,17 @@ import { getWorkspaceDir } from "@vellumai/plugin-api";
 import { CHANNEL_ID } from "./plugin-paths.ts";
 import type { ProviderId } from "./providers/types.ts";
 
-/** Route path prefix declared in `channels/ingress.json`. */
-export const INGRESS_ROUTE_PREFIX = "events";
+/**
+ * Route path for a provider, as declared in `channels/ingress.json`.
+ *
+ * Flat rather than nested (`events-photon`, not `events/photon`) so the path,
+ * the handler filename, and the declaration are all one segment — the gateway
+ * matches declared paths exactly, and a nested path is three places for a
+ * separator to disagree.
+ */
+export function ingressRoutePath(provider: ProviderId): string {
+  return `events-${provider}`;
+}
 
 /**
  * Query parameter carrying the shared secret on providers that do not sign.
@@ -94,7 +103,7 @@ export function resolveWebhookEndpoint(
   }
 
   const url = new URL(
-    `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${INGRESS_ROUTE_PREFIX}/${opts.provider}`,
+    `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${ingressRoutePath(opts.provider)}`,
   );
   if (opts.sharedSecret) {
     url.searchParams.set(SHARED_SECRET_PARAM, opts.sharedSecret);

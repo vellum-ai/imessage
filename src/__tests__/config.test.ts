@@ -7,17 +7,17 @@ import {
 } from "../config.ts";
 
 describe("resolveConfig", () => {
-  test("defaults to comms over webhooks", () => {
-    // Bring-your-own is the only path: dedicated lines are priced per line by
-    // every vendor that offers them, so there is nothing to bundle.
+  test("defaults to photon over webhooks", () => {
+    // Bring-your-own is the only path either way: dedicated lines are priced
+    // per line by every vendor that offers them, so there is nothing to bundle.
     const { config } = resolveConfig({});
-    expect(config.provider).toBe("comms");
+    expect(config.provider).toBe("photon");
     expect(config.ingressMode).toBe("webhook");
     expect(config.allowedHandles).toEqual([]);
   });
 
   test("accepts an absent config", () => {
-    expect(resolveConfig(undefined).config.provider).toBe("comms");
+    expect(resolveConfig(undefined).config.provider).toBe("photon");
   });
 
   test("accepts an explicit provider", () => {
@@ -53,7 +53,7 @@ describe("resolveConfig", () => {
 
   test("rejects an unknown provider", () => {
     const { config, warnings } = resolveConfig({ provider: "bluebubbles" });
-    expect(config.provider).toBe("comms");
+    expect(config.provider).toBe("photon");
     expect(warnings.length).toBeGreaterThan(0);
   });
 

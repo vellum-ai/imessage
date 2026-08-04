@@ -24,8 +24,26 @@ import {
 import { resolveProvider } from "./providers/index.ts";
 import { PollWorkerSupervisor } from "./worker/supervisor.ts";
 
+/**
+ * What happened to the channel.
+ *
+ * - `running` — ingress is up on the configured provider.
+ * - `idle` — the provider was built here and could not come up; `idleReason`
+ *   says why, and it is something the user can act on.
+ * - `not-loaded` — this process has no plugin runtime to restart. The config
+ *   write still happened and takes effect when the plugin next loads.
+ *
+ * The third case used to report itself as idle with the reason "plugin is not
+ * initialized", which read to a user clicking a provider button as though
+ * their channel had just broken. It had not: nothing was running in *this*
+ * process to restart. Separating the two is what lets the settings app say
+ * "saved, applies on reload" instead of raising an alarm.
+ */
+export type ChannelStatus = "running" | "idle" | "not-loaded";
+
 export interface StartRuntimeResult {
-  /** Why the channel is idle, or `undefined` when it came up. */
+  status: ChannelStatus;
+  /** Why the channel is idle. Only set when `status` is `idle`. */
   idleReason?: string;
 }
 
@@ -50,7 +68,7 @@ export function startChannelRuntime(
 ): StartRuntimeResult {
   const ctx = getInitContext();
   if (!ctx) {
-    return { idleReason: "plugin is not initialized" };
+    return { status: "not-loaded" };
   }
 
   stopIngress();
@@ -72,7 +90,7 @@ export function startChannelRuntime(
       { err, provider: config.provider },
       "imessage: could not build the configured provider — the channel is idle",
     );
-    return { idleReason };
+    return { status: "idle", idleReason };
   }
 
   setProvider(provider);
@@ -83,13 +101,13 @@ export function startChannelRuntime(
       { provider: provider.id },
       `imessage: webhook ingress — inbound arrives at /webhooks/plugins/${ctx.pluginName}/events`,
     );
-    return {};
+    return { status: "running" };
   }
 
   if (!provider.supportsPolling) {
     const idleReason = `provider ${provider.id} is webhook-only but ingressMode is 'poll'`;
     ctx.logger.warn({ provider: provider.id }, `imessage: ${idleReason}`);
-    return { idleReason };
+    return { status: "idle", idleReason };
   }
 
   const supervisor = new PollWorkerSupervisor({
@@ -125,5 +143,5 @@ export function startChannelRuntime(
     { provider: provider.id, intervalMs: config.pollIntervalMs },
     "imessage: poll worker started",
   );
-  return {};
+  return { status: "running" };
 }

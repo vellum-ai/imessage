@@ -29,8 +29,8 @@ const init = async (ctx: InitContext): Promise<void> => {
     pluginName: pluginName(),
   });
 
-  const { idleReason } = startChannelRuntime(config);
-  if (idleReason) {
+  const { status, idleReason } = startChannelRuntime(config);
+  if (status === "idle") {
     ctx.logger.info(
       { idleReason },
       "imessage: channel is idle — change the provider from the settings app or fix the configuration",

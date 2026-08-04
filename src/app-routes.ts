@@ -6,10 +6,16 @@
  */
 
 import {
+  CredentialWriteError,
+  readCredentialStatus,
+  storeCredentials,
+} from "./app-credentials.ts";
+import {
   applyConfigUpdate,
   applyProviderChange,
   ConfigUpdateSchema,
   ConfigValidationError,
+  CredentialUpdateSchema,
   EDITABLE_CONFIG_KEYS,
   ProviderChangeSchema,
   readConfigView,
@@ -32,8 +38,12 @@ function json(body: unknown, status = 200): Response {
  *
  * `activeProvider` is the provider actually running, which can differ from the
  * configured one when the configured provider failed to build. Reporting both
- * is what lets the app show "configured as vellum, currently idle" instead of
+ * is what lets the app show "configured as photon, currently idle" instead of
  * claiming everything is fine.
+ *
+ * `credentials` rides along rather than sitting behind its own GET: the app
+ * needs it to draw the very first frame, and a second round trip would only
+ * buy a moment of rendering fields whose state is unknown.
  */
 export async function handleSettingsGet(): Promise<Response> {
   const config = readConfigView(pluginConfigPath());
@@ -41,6 +51,65 @@ export async function handleSettingsGet(): Promise<Response> {
     config,
     editableKeys: EDITABLE_CONFIG_KEYS,
     providers: PROVIDER_IDS,
+    activeProvider: getProvider()?.id ?? null,
+    credentials: await readCredentialStatus(),
+  });
+}
+
+/**
+ * `POST /x/plugins/imessage/credentials`: store a provider's credentials.
+ *
+ * Answers with the refreshed status rather than an acknowledgement, so the app
+ * renders what the store actually holds instead of assuming the write landed.
+ *
+ * Storing credentials for the *configured* provider also restarts ingress. A
+ * channel that is idle for want of an API key should come up the moment the
+ * key arrives, and telling someone to go click the provider button afterwards
+ * is a step that only exists because the code did not do it.
+ */
+export async function handleCredentialsPost(
+  request: Request,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+
+  const parsed = CredentialUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return json(
+      {
+        error: "invalid credential update",
+        detail: parsed.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        })),
+      },
+      400,
+    );
+  }
+
+  try {
+    await storeCredentials(parsed.data.provider, parsed.data.values);
+  } catch (err) {
+    if (err instanceof CredentialWriteError) {
+      return json({ error: err.message }, 400);
+    }
+    throw err;
+  }
+
+  const config = readConfigView(pluginConfigPath());
+  const result =
+    config.provider === parsed.data.provider
+      ? startChannelRuntime(config)
+      : undefined;
+
+  return json({
+    credentials: await readCredentialStatus(),
+    status: result?.status ?? null,
+    idleReason: result?.idleReason ?? null,
     activeProvider: getProvider()?.id ?? null,
   });
 }
@@ -84,7 +153,11 @@ export async function handleSettingsPatch(
   // restarted rather than left on the previous configuration until a reboot.
   const result = startChannelRuntime(config);
 
-  return json({ config, idleReason: result.idleReason ?? null });
+  return json({
+    config,
+    status: result.status,
+    idleReason: result.idleReason ?? null,
+  });
 }
 
 /**
@@ -117,6 +190,8 @@ export async function handleProviderPost(request: Request): Promise<Response> {
   return json({
     config,
     activeProvider: getProvider()?.id ?? null,
+    status: result.status,
     idleReason: result.idleReason ?? null,
+    credentials: await readCredentialStatus(),
   });
 }

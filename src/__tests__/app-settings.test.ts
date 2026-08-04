@@ -9,9 +9,12 @@ import {
   applyProviderChange,
   ConfigUpdateSchema,
   ConfigValidationError,
+  CredentialUpdateSchema,
   ProviderChangeSchema,
   readConfigView,
 } from "../app-settings.ts";
+import { PROVIDER_CREDENTIALS } from "../config.ts";
+import { PROVIDER_IDS } from "../providers/types.ts";
 
 let dir: string;
 let configPath: string;
@@ -141,5 +144,72 @@ describe("applyProviderChange", () => {
     expect(
       ProviderChangeSchema.safeParse({ provider: "comms", extra: 1 }).success,
     ).toBe(false);
+  });
+});
+
+describe("CredentialUpdateSchema", () => {
+  test("accepts a provider and its values", () => {
+    expect(
+      CredentialUpdateSchema.safeParse({
+        provider: "photon",
+        values: { photon_project_id: "proj_1" },
+      }).success,
+    ).toBe(true);
+  });
+
+  test("rejects an unknown provider", () => {
+    expect(
+      CredentialUpdateSchema.safeParse({
+        provider: "bluebubbles",
+        values: {},
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects a non-string value rather than storing it stringified", () => {
+    expect(
+      CredentialUpdateSchema.safeParse({
+        provider: "comms",
+        values: { api_key: 12345 },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects extra keys", () => {
+    expect(
+      CredentialUpdateSchema.safeParse({
+        provider: "comms",
+        values: {},
+        also: "no",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("provider credentials", () => {
+  test("every provider declares what it needs", () => {
+    // The settings app renders this list and each adapter resolves from it, so
+    // a provider missing an entry is a provider the app cannot configure.
+    for (const id of PROVIDER_IDS) {
+      expect(PROVIDER_CREDENTIALS[id].length).toBeGreaterThan(0);
+    }
+  });
+
+  test("fields are unique across providers", () => {
+    // One credential service backs both, so two providers sharing a field name
+    // would have one silently overwrite the other's value.
+    const fields = PROVIDER_IDS.flatMap((id) =>
+      PROVIDER_CREDENTIALS[id].map((spec) => spec.field),
+    );
+    expect(new Set(fields).size).toBe(fields.length);
+  });
+
+  test("every field carries the label and hint the app renders", () => {
+    for (const id of PROVIDER_IDS) {
+      for (const spec of PROVIDER_CREDENTIALS[id]) {
+        expect(spec.label.length).toBeGreaterThan(0);
+        expect(spec.hint.length).toBeGreaterThan(0);
+      }
+    }
   });
 });

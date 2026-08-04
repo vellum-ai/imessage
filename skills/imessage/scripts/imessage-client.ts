@@ -13,6 +13,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   chunkForDelivery,
@@ -27,6 +29,50 @@ const CREDENTIAL_FIELD = "api_key";
 
 /** E.164: a leading `+` then 7 to 15 digits. */
 const E164_RE = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * Refuse to send when the channel is configured for another provider.
+ *
+ * This script only speaks Comms. The channel itself is provider-agnostic, but
+ * that seam lives in-process and this runs as a standalone bun process with no
+ * access to it. Sending anyway would put the message out over a line the user
+ * did not configure — or, more likely, fail on a credential that was never
+ * meant for Comms and report it as a Comms problem.
+ *
+ * `config.json` is read directly rather than through `src/config.ts`, which
+ * would drag in `@vellumai/plugin-api` for a value that is one `JSON.parse`
+ * away. A missing or unreadable file reads as the default, which is Comms.
+ */
+function assertCommsIsConfigured(): void {
+  const configPath = join(
+    new URL(".", import.meta.url).pathname,
+    "..",
+    "..",
+    "..",
+    "config.json",
+  );
+
+  let provider = "comms";
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, "utf-8"));
+    if (parsed && typeof parsed === "object") {
+      const configured = (parsed as { provider?: unknown }).provider;
+      if (typeof configured === "string" && configured.length > 0) {
+        provider = configured;
+      }
+    }
+  } catch {
+    // No config, or an unreadable one: the plugin's own default is Comms.
+  }
+
+  if (provider !== "comms") {
+    throw new Error(
+      `The iMessage channel is configured for the "${provider}" provider, and this ` +
+        "script can only send over Comms. Send through the channel itself, or " +
+        "switch the provider to comms in the iMessage settings app.",
+    );
+  }
+}
 
 export interface SentChunk {
   id: string;
@@ -142,6 +188,7 @@ export interface SendOptions {
  * of order.
  */
 export async function sendMessage(opts: SendOptions): Promise<SentChunk[]> {
+  assertCommsIsConfigured();
   const to = normalizeRecipient(opts.to);
   const chunks = chunkForDelivery(opts.body);
   if (chunks.length === 0) {

@@ -3,11 +3,14 @@
  *
  * The point of `channel-runtime.ts` is that a restart from the settings app
  * runs the same code as a fresh boot. These pin the parts of that which are
- * easy to break: reporting idle instead of throwing, and clearing the previous
- * provider before building a replacement.
+ * easy to break: reporting a status instead of throwing, and clearing the
+ * previous provider before building a replacement.
  *
- * `vellum` is the unbuildable provider these use as a fixture — nothing injects
- * a platform caller yet — which is what makes the failure paths reachable.
+ * The failure paths need a provider that cannot be built. Both shipping
+ * providers can be, so these reach that branch the way a real deployment would
+ * — a config naming a provider the registry does not have, which is exactly
+ * what an install carrying an older `provider` value hands over after an
+ * upgrade.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -17,13 +20,30 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { startChannelRuntime, stopIngress } from "../channel-runtime.ts";
-import { IMessageConfigSchema } from "../config.ts";
+import type { IMessageConfig } from "../config.ts";
+import { IMessageConfigSchema, resolveConfig } from "../config.ts";
 import {
   getChannel,
   getProvider,
   resetPluginState,
   setInitContext,
 } from "../plugin-state.ts";
+import type { ProviderId } from "../providers/types.ts";
+
+/**
+ * A config naming a provider that no longer exists.
+ *
+ * Built by hand rather than through the schema, because the schema is what
+ * stops this from reaching the runtime in the first place: it rejects an
+ * unknown id and falls back to defaults. What is under test here is the layer
+ * below that, which has to survive being handed one anyway.
+ */
+function configNamingMissingProvider(): IMessageConfig {
+  return {
+    ...IMessageConfigSchema.parse({}),
+    provider: "no-such-provider" as ProviderId,
+  };
+}
 
 const SILENT_LOGGER = {
   debug: () => {},
@@ -54,17 +74,32 @@ function withContext(): void {
 }
 
 describe("startChannelRuntime", () => {
-  test("without an init context it reports idle rather than throwing", () => {
-    const config = IMessageConfigSchema.parse({});
-    expect(startChannelRuntime(config).idleReason).toContain("not initialized");
+  test("with no plugin loaded it says so instead of claiming idle", () => {
+    // The case a user hit by clicking a provider: the config write lands, but
+    // there is no running channel in this process to restart. Reporting that
+    // as idle read as "your channel just broke" — it had not.
+    const result = startChannelRuntime(IMessageConfigSchema.parse({}));
+
+    expect(result.status).toBe("not-loaded");
+    expect(result.idleReason).toBeUndefined();
   });
 
-  test("webhook ingress comes up with no idle reason", () => {
+  test("a config naming a removed provider falls back rather than breaking", () => {
+    // An install configured for a provider that has since been removed must
+    // come up on the default, not refuse to load.
+    const { config, warnings } = resolveConfig({ provider: "vellum" });
+
+    expect(config.provider).toBe("comms");
+    expect(warnings.join(" ")).toContain("provider");
+  });
+
+  test("webhook ingress comes up running", () => {
     withContext();
     const result = startChannelRuntime(
       IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
 
+    expect(result.status).toBe("running");
     expect(result.idleReason).toBeUndefined();
     expect(getProvider()?.id).toBe("comms");
     expect(getChannel()?.channel).toBe("imessage");
@@ -77,19 +112,17 @@ describe("startChannelRuntime", () => {
     startChannelRuntime(config);
     const second = startChannelRuntime(config);
 
-    expect(second.idleReason).toBeUndefined();
+    expect(second.status).toBe("running");
     expect(getProvider()?.id).toBe("comms");
   });
 
   test("a provider that cannot be built leaves the channel idle", () => {
-    // Nothing injects a platform caller for vellum yet. Plugin load has to
-    // survive that rather than fail.
+    // Plugin load has to survive a provider that throws rather than fail.
     withContext();
-    const result = startChannelRuntime(
-      IMessageConfigSchema.parse({ provider: "vellum" }),
-    );
+    const result = startChannelRuntime(configNamingMissingProvider());
 
-    expect(result.idleReason).toContain("platform caller");
+    expect(result.status).toBe("idle");
+    expect(result.idleReason).toContain("unknown provider");
     expect(getProvider()).toBeUndefined();
   });
 
@@ -100,9 +133,7 @@ describe("startChannelRuntime", () => {
     startChannelRuntime(IMessageConfigSchema.parse({ ingressMode: "webhook" }));
     expect(getProvider()?.id).toBe("comms");
 
-    const result = startChannelRuntime(
-      IMessageConfigSchema.parse({ provider: "vellum" }),
-    );
+    const result = startChannelRuntime(configNamingMissingProvider());
 
     expect(result.idleReason).toBeTruthy();
     expect(getProvider()).toBeUndefined();

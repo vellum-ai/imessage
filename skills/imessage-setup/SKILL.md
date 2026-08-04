@@ -1,6 +1,6 @@
 ---
 name: imessage-setup
-description: Set up the iMessage channel with a Comms by Osis account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle.
+description: Set up the iMessage channel with the user's own Comms by Osis or Photon account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle.
 metadata:
   emoji: "💬"
   vellum:
@@ -8,15 +8,15 @@ metadata:
     display-name: "iMessage Setup"
 ---
 
-Connects the iMessage channel to the user's own [Comms by
-Osis](https://comms.osis.co) account.
+Connects the iMessage channel to the user's own line, from either [Comms by
+Osis](https://comms.osis.co) or [Photon](https://photon.codes).
 
 ## Set expectations first
 
 Say this before starting, because it is usually not what people picture:
 
-- The user creates their **own** Comms account and their own line. There is no
-  Vellum-provided number available today.
+- The user creates their **own** account with one of the two vendors, and their
+  own line. There is no number provided for them.
 - People reach the assistant by texting **that line**, not the user's own
   number.
 - The assistant does **not** read the user's personal iMessage account or
@@ -28,7 +28,20 @@ iMessage threads, this is the wrong tool. Say so plainly rather than proceeding.
 Worth mentioning if they ask why they have to bring their own: dedicated
 iMessage lines run about $250/month from the vendors that offer them, and a
 shared line cannot give anyone a stable number. Bring-your-own is the only
-honest shape for now. Do not promise a Vellum-provided line is coming.
+honest shape for now. Do not promise a provided line is coming.
+
+## Pick a provider
+
+Either works. Ask which account they already have before creating one.
+
+| | Comms by Osis | Photon |
+| --- | --- | --- |
+| Credentials | One API key | Project ID + project secret |
+| Sending | One REST call | Mints a short-lived token, then sends |
+| Ingress | Webhook or poll | Webhook or poll |
+
+Everything below covers Comms. For Photon, the shape is the same and only the
+two steps marked **Photon** differ.
 
 ## 1. Create the line and mint a key
 
@@ -47,15 +60,32 @@ Have them mint all three up front. **Scopes are fixed at creation** — a key
 missing one has to be replaced, not upgraded, so a second trip to the dashboard
 is the common failure of doing this piecemeal.
 
-## 2. Store the key
+**Photon** — instead of the above: have the user create a project at
+https://photon.codes, then take its **project ID** and **project secret** from
+the dashboard. Photon has no scope list to get wrong; the pair authenticates
+everything, and the line comes from the project rather than being provisioned
+separately.
+
+## 2. Store the credentials
+
+The settings app is the shortest path: open the iMessage plugin's settings,
+pick the provider, and fill in its fields. It stores them in the credential
+store and restarts the channel.
+
+From a terminal instead:
 
 ```bash
+# Comms
 assistant credentials set --service imessage --field api_key <key>
+
+# Photon
+assistant credentials set --service imessage --field photon_project_id <id>
+assistant credentials set --service imessage --field photon_project_secret <secret>
 ```
 
-Never put the key in `config.json` and never paste it into chat. The plugin
-reads it from the credential store at call time, so rotating it later needs no
-restart.
+Never put a secret in `config.json` and never paste one into chat. The plugin
+reads them from the credential store at call time, so rotating one later needs
+no restart.
 
 ## 3. Confirm sending works
 
@@ -66,9 +96,15 @@ bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup
 Have the user confirm it arrived. Sending is the half that needs only
 `comms_send`, so this isolates a credential problem from an ingress problem.
 
+**Photon** — this script speaks Comms only and will refuse rather than send
+over the wrong line. Confirm a Photon setup from the settings app instead: it
+reports the channel as running once the project ID and secret resolve.
+
 ## 4. Inbound
 
-Inbound is webhook-first. Register the endpoint with Comms pointing at:
+Inbound is webhook-first. Register the endpoint with the provider — Comms takes
+`POST /webhooks`, Photon takes `POST /projects/{projectId}/webhooks/` and
+returns a signing secret **once** — pointing at:
 
 ```
 <public ingress URL>/webhooks/plugins/imessage/events
@@ -97,7 +133,7 @@ Optional, in the plugin's `config.json`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `provider` | `"comms"` | Leave it. `"vellum"` exists but is not available and leaves the channel idle. |
+| `provider` | `"comms"` | `"comms"` or `"photon"`. Set it from the settings app, which restarts ingress; editing it here needs a reload. |
 | `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
 | `sendChannel` | unset | Force `"sms"` or `"imessage"`. Leave unset. |
@@ -108,8 +144,13 @@ assistant's admission policy is the real gate and applies either way.
 
 ## Troubleshooting
 
-**"No Comms API key found"** — step 2 was skipped or used a different service
-name. Check with `assistant credentials list`.
+**"The Comms API key is not set"** (or the Photon equivalent) — step 2 was
+skipped or used a different service name. Check with `assistant credentials
+list`, or open the settings app, which shows which fields are stored.
+
+**Photon: "invalid credentials"** — the project ID and secret are a pair; a
+stale secret against a current id fails the same way a wrong id does. Re-copy
+both from the dashboard rather than guessing which one drifted.
 
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.

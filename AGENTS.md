@@ -80,8 +80,8 @@ does and what keeps a click on the provider you already use from restarting
 your channel. Save writes the provider first and the credentials second: the
 switch restarts ingress on a provider whose key may be missing, and storing the
 key restarts it again — that second pass is the one that comes up. Re-posting
-the active provider still bounces ingress for anyone calling the route
-directly, which stays a useful recovery for a wedged poll worker.
+the active provider bounces ingress for anyone calling the route directly,
+which stays a useful recovery for a wedged poll worker.
 
 One deliberate divergence: the reference's Reset deletes a stored key. The
 plugin API can only *set* a credential, never remove one, so Reset here reverts
@@ -92,14 +92,6 @@ report `{ field, label, placeholder, secret, set }` — enough to draw an input 
 and the app's `PROVIDER_CATALOG` holds the prose: display name, subtitle, and
 where to get the credential. Same split the reference makes.
 
-**A missing `credentials` map is not an empty one.** The app renders
-"the running plugin does not report which credentials this provider needs"
-rather than "this provider needs no credentials", and says so out loud when the
-plugin offers a provider id this build has never heard of. Both mean the panel
-and the running plugin are out of step — usually a bundle newer than the daemon
-— and the honest answer is "reload the plugin", not a form that quietly claims
-Comms needs no API key.
-
 `startChannelRuntime` never throws; it reports a `status`:
 
 - **`running`** — ingress is up.
@@ -108,17 +100,12 @@ Comms needs no API key.
 - **`not-loaded`** — this process has no plugin runtime to restart. The config
   write still happened and applies on the next load.
 
-That third case used to report itself as idle with the reason "plugin is not
-initialized", which reads as a breakage to someone who just clicked a button.
-Keep the distinction: an alarming banner for a state nobody caused and nobody
-can fix is worse than no banner.
+Keep `not-loaded` distinct from `idle`: an alarming banner for a state nobody
+caused and nobody can fix is worse than no banner.
 
 `startChannelRuntime` also clears the previous provider *before* building the
 new one, so a failed switch cannot leave the old provider sending under a config
-that no longer names it. With both shipping providers buildable, the tests reach
-that path the way a real deployment would — a config naming a provider the
-registry does not have, which is what an install carrying an older `provider`
-value hands over after an upgrade.
+that no longer names it.
 
 ## Outbound
 
@@ -148,25 +135,58 @@ provider collapse the duplicate chunk and drop it.
 
 ## Ingress
 
-Webhooks are the default. **The gateway verifies delivery signatures, enforces
-body limits, and rate-limits before the route handler runs** — the plugin does
-not re-implement any of that. Two verification schemes would be two things to
-keep in sync and one to get subtly wrong.
+Webhooks are the default, and registering them is **this plugin's job**. The
+gateway serves the route but never holds a provider credential, so nothing else
+in the system is in a position to tell Comms or Photon where to deliver.
+`ensureWebhook` on the provider seam does it: list first, create only when
+nothing matches, run on every webhook-mode start. That is what makes saving a
+credential in the settings app finish setup — the restart that follows the save
+is what registers.
 
-**Open question on Photon inbound.** Photon signs each delivery with
-`X-Spectrum-Signature` (HMAC-SHA256 over the body, using a per-webhook secret
-returned exactly once at registration) plus `X-Spectrum-Timestamp`, and
-deduplicates on `webhookId + message.id`. Whether the gateway's verification
-covers that scheme has not been confirmed against a running host. If it does
-not, the rule above still stands — the fix belongs in the gateway, not in a
-second verifier here — and poll ingress works in the meantime. Do not add
-plugin-side signature checking to work around it without settling that first.
+The address comes from `src/webhook-endpoint.ts`:
+`<ingress.publicBaseUrl>/webhooks/plugins/<plugin>/events`, where the base is
+the assistant's own setting read out of `<workspaceDir>/config.json`. The
+plugin does not carry its own copy — a second setting that has to agree with
+the assistant's is a second setting that can disagree. When the base is empty
+(a Velay-tunnelled deployment keeps the public URL in gateway state, not
+config) registration reports a reason instead of guessing: a wrong URL is worse
+than none, because the provider then reports a healthy webhook pointing
+nowhere.
 
-Polling exists for deployments whose gateway is not reachable from the
-internet. It runs in **its own worker process** (`src/worker/`), not the
-daemon: a busy line or a slow provider must not compete with the assistant's
-event loop, and a crash in the loop must not take the daemon down. The
-supervisor restarts it with backoff. Both providers support it.
+### The gateway will reject provider deliveries today
+
+Read `gateway/src/http/routes/plugin-webhook.ts` in vellum-assistant before
+touching this. Every HTTP delivery to `/webhooks/plugins/<plugin>/<path>` is
+verified as:
+
+```
+Vellum-Signature: sha256=<hex HMAC-SHA256(rawBody, <plugin>/webhook_secret)>
+```
+
+No secret stored → **409**. Missing or wrong signature → **403**. There is no
+exemption and no provider-native verification anywhere in the gateway — the
+platform email webhook verifies the same scheme against `vellum/webhook_secret`.
+
+Comms and Photon sign with their own schemes (Photon uses
+`X-Spectrum-Signature`, HMAC-SHA256 with a per-webhook secret returned once at
+registration; both take only `{ url }` when registering, with nowhere to
+configure a header). **Neither can produce a `Vellum-Signature`.** So a
+registered webhook is necessary but not sufficient: deliveries land on the
+gateway and are refused before this plugin sees them.
+
+That is a gateway-side gap, and the fix belongs there — a signer or handshake
+variant for third-party callers, or provider-native verification selected by
+the ingress manifest, which already carries `signer` and `handshake` fields for
+exactly this kind of distinction. **Do not add plugin-side signature checking
+to work around it.** The plugin does not re-implement verification: two schemes
+would be two things to keep in sync and one to get subtly wrong, and the route
+handler only ever runs on deliveries the gateway already authenticated.
+
+Until that lands, **poll ingress is the one that works end to end.** Both
+providers support it. It runs in **its own worker process** (`src/worker/`),
+not the daemon: a busy line or a slow provider must not compete with the
+assistant's event loop, and a crash in the loop must not take the daemon down.
+The supervisor restarts it with backoff.
 
 ## Credentials
 

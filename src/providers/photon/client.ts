@@ -30,7 +30,9 @@ import {
   EnvelopeSchema,
   IMessageInfoSchema,
   ListMessagesResponseSchema,
+  ListWebhooksResponseSchema,
   PhotonMessageSchema,
+  PhotonWebhookSchema,
   ProjectSchema,
   SendTextResponseSchema,
   TokenResponseSchema,
@@ -40,6 +42,7 @@ import type {
   ListMessagesResponse,
   PhotonMessage,
   PhotonProject,
+  PhotonWebhook,
   TokenResponse,
 } from "./schemas.ts";
 import { resolveCredentialField } from "../../config.ts";
@@ -164,6 +167,27 @@ export class PhotonClient {
       );
     }
     return parsed.data;
+  }
+
+  /** `GET /projects/{projectId}/webhooks/`. */
+  async listWebhooks(): Promise<PhotonWebhook[]> {
+    const data = await this.cloudRequest("/webhooks/", { method: "GET" });
+    return ListWebhooksResponseSchema.safeParse(data).data ?? [];
+  }
+
+  /**
+   * `POST /projects/{projectId}/webhooks/`.
+   *
+   * The response carries a `signingSecret` exactly once. It is dropped on
+   * purpose: the gateway verifies deliveries against its own secret, so
+   * holding Photon's would only imply a check nothing performs.
+   */
+  async createWebhook(url: string): Promise<PhotonWebhook | undefined> {
+    const data = await this.cloudRequest("/webhooks/", {
+      method: "POST",
+      body: JSON.stringify({ webhookUrl: url }),
+    });
+    return PhotonWebhookSchema.safeParse(data).data;
   }
 
   /** `POST /v1/messages:sendText`. */

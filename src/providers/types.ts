@@ -57,6 +57,14 @@ export interface SendResult {
   id?: string;
 }
 
+/** What `ensureWebhook` found or did. */
+export interface WebhookRegistration {
+  /** False when a registration for that URL was already there. */
+  created: boolean;
+  /** Provider-side id, when the provider returned one. */
+  id?: string;
+}
+
 /**
  * What a provider must implement to back this channel.
  *
@@ -80,6 +88,19 @@ export interface MessagingProvider {
   checkReadiness(): Promise<{ ready: true } | { ready: false; reason: string }>;
 
   fetchInbound(opts: FetchInboundOptions): Promise<InboundRecord[]>;
+
+  /**
+   * Point the provider's webhook at `url`, if it is not already.
+   *
+   * Registering is the plugin's job, not the gateway's: the gateway serves the
+   * route but never holds provider credentials, so nothing else in the system
+   * is in a position to tell Comms or Photon where to deliver.
+   *
+   * Implementations list first and create only when nothing matches. Called on
+   * every start in webhook mode, so a create-blindly implementation would pile
+   * up duplicate registrations and deliver every message several times.
+   */
+  ensureWebhook(url: string): Promise<WebhookRegistration>;
 
   send(
     target: SendTarget,

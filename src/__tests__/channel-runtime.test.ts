@@ -7,10 +7,8 @@
  * previous provider before building a replacement.
  *
  * The failure paths need a provider that cannot be built. Both shipping
- * providers can be, so these reach that branch the way a real deployment would
- * — a config naming a provider the registry does not have, which is exactly
- * what an install carrying an older `provider` value hands over after an
- * upgrade.
+ * providers can be, so these reach that branch with a config naming a provider
+ * the registry does not have.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,7 +29,7 @@ import {
 import type { ProviderId } from "../providers/types.ts";
 
 /**
- * A config naming a provider that no longer exists.
+ * A config naming a provider the registry does not have.
  *
  * Built by hand rather than through the schema, because the schema is what
  * stops this from reaching the runtime in the first place: it rejects an
@@ -84,10 +82,10 @@ describe("startChannelRuntime", () => {
     expect(result.idleReason).toBeUndefined();
   });
 
-  test("a config naming a removed provider falls back rather than breaking", () => {
-    // An install configured for a provider that has since been removed must
-    // come up on the default, not refuse to load.
-    const { config, warnings } = resolveConfig({ provider: "vellum" });
+  test("an unreadable provider value falls back rather than breaking", () => {
+    // `config.json` is edited by hand as well as by the app, so a value the
+    // schema rejects has to come up on the default, not refuse to load.
+    const { config, warnings } = resolveConfig({ provider: "not-a-provider" });
 
     expect(config.provider).toBe("comms");
     expect(warnings.join(" ")).toContain("provider");

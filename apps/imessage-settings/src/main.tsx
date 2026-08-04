@@ -47,11 +47,10 @@ interface ProviderCatalogEntry {
 }
 
 /**
- * Display copy for the providers this build knows about.
+ * Display copy for each provider.
  *
- * Which providers actually exist comes from the plugin; this only says how to
- * describe them. An id the plugin reports that is missing here means the two
- * are out of step, which the app says out loud rather than rendering a bare id.
+ * Which providers exist comes from the plugin; this only says how to describe
+ * them.
  */
 const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
@@ -186,13 +185,8 @@ interface Settings {
   config: { provider: string };
   providers: string[];
   activeProvider: string | null;
-  /**
-   * Absent when the running plugin predates the credentials route. Optional
-   * here on purpose: "the plugin did not say" and "this provider needs
-   * nothing" are different answers, and rendering the first as the second is
-   * how the app ends up claiming Comms needs no API key.
-   */
-  credentials?: Credentials;
+  /** Every provider's fields, keyed by provider id. */
+  credentials: Credentials;
 }
 
 interface ChannelResult {
@@ -308,30 +302,19 @@ function App(): React.ReactElement {
 
   const serverProvider = settings?.config.provider ?? null;
 
-  /**
-   * Providers the plugin offers, in catalog order, plus any it reports that
-   * this build has never heard of.
-   */
-  const options = useMemo(() => {
-    const reported = settings?.providers ?? [];
-    const known = PROVIDER_CATALOG.filter((entry) =>
-      reported.includes(entry.id),
-    ).map((entry) => ({ id: entry.id, label: entry.displayName }));
-    const unknown = reported
-      .filter((id) => !KNOWN_PROVIDERS.has(id))
-      .map((id) => ({ id, label: id }));
-    return [...known, ...unknown];
-  }, [settings]);
-
-  const unknownProviders = useMemo(
-    () => (settings?.providers ?? []).filter((id) => !KNOWN_PROVIDERS.has(id)),
+  /** Providers the plugin offers, in catalog order. */
+  const options = useMemo(
+    () =>
+      PROVIDER_CATALOG.filter((entry) =>
+        (settings?.providers ?? []).includes(entry.id),
+      ),
     [settings],
   );
 
   const catalog = draftProvider ? KNOWN_PROVIDERS.get(draftProvider) : undefined;
-  const fields = draftProvider
-    ? settings?.credentials?.[draftProvider]
-    : undefined;
+  const fields: CredentialField[] = draftProvider
+    ? (settings?.credentials[draftProvider] ?? [])
+    : [];
 
   const save = useCallback(async () => {
     if (!draftProvider || !settings) return;
@@ -341,7 +324,7 @@ function App(): React.ReactElement {
     // Only fields belonging to the provider on screen, so a draft left over
     // from another provider can never ride along.
     const values = Object.fromEntries(
-      (fields ?? [])
+      fields
         .map((spec): [string, string] => [spec.field, drafts[spec.field] ?? ""])
         .filter(([, value]) => value.trim().length > 0),
     );
@@ -412,7 +395,7 @@ function App(): React.ReactElement {
     );
   }
 
-  const typed = (fields ?? []).some(
+  const typed = fields.some(
     (spec) => (drafts[spec.field] ?? "").trim().length > 0,
   );
   const hasChanges = draftProvider !== serverProvider || typed;
@@ -431,14 +414,6 @@ function App(): React.ReactElement {
         {notice ? (
           <div className={`banner ${notice.tone}`}>{notice.text}</div>
         ) : null}
-        {unknownProviders.length > 0 ? (
-          <div className="banner warn">
-            The running plugin still offers{" "}
-            {unknownProviders.map((id) => `"${id}"`).join(", ")}, which this
-            panel does not know about. Reload the plugin so the two match.
-          </div>
-        ) : null}
-
         <div className="stack">
           <div className="field">
             <label htmlFor="provider">Provider</label>
@@ -453,23 +428,14 @@ function App(): React.ReactElement {
             >
               {options.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.label}
+                  {option.displayName}
                 </option>
               ))}
             </select>
             {catalog ? <p className="note">{catalog.subtitle}</p> : null}
           </div>
 
-          {fields === undefined ? (
-            <div className="banner warn" style={{ margin: 0 }}>
-              The running plugin does not report which credentials this provider
-              needs, so there is nothing to fill in here yet. Reload the plugin,
-              or set the credential from a terminal with{" "}
-              <code>assistant credentials set --service imessage</code>.
-            </div>
-          ) : null}
-
-          {(fields ?? []).map((spec) => (
+          {fields.map((spec) => (
             <div className="field" key={spec.field}>
               <label htmlFor={spec.field}>{spec.label}</label>
               <input
@@ -497,7 +463,7 @@ function App(): React.ReactElement {
             </div>
           ))}
 
-          {catalog && fields !== undefined ? (
+          {catalog ? (
             <div className="guide">
               <InfoIcon />
               <div className="body">

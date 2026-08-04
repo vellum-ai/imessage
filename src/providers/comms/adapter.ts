@@ -8,13 +8,19 @@
 
 import { CommsClient } from "./client.ts";
 import { normalizeCommsMessage, normalizeWebhookEvent } from "./normalize.ts";
-import { createdAtOf } from "./schemas.ts";
+import {
+  CommsWebhookSchema,
+  createdAtOf,
+  webhookUrlOf,
+  webhooksFromListing,
+} from "./schemas.ts";
 import type {
   FetchInboundOptions,
   InboundRecord,
   MessagingProvider,
   SendResult,
   SendTarget,
+  WebhookRegistration,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveApiKey } from "../../config.ts";
@@ -61,6 +67,24 @@ export function createCommsProvider(
         // provider-agnostic: it never sees a Comms-shaped payload.
         event: normalizeCommsMessage(message, new Date().toISOString()),
       }));
+    },
+
+    /**
+     * `message.received` only. Registering for `message.sent` would deliver
+     * our own replies straight back, and the normalizer would drop every one
+     * of them — traffic and log noise for nothing.
+     */
+    async ensureWebhook(url: string): Promise<WebhookRegistration> {
+      const existing = webhooksFromListing(await client.listWebhooks()).find(
+        (hook) => webhookUrlOf(hook) === url,
+      );
+      if (existing) return { created: false, id: existing.id };
+
+      const created = await client.createWebhook(url, ["message.received"]);
+      return {
+        created: true,
+        id: CommsWebhookSchema.safeParse(created).data?.id,
+      };
     },
 
     async send(

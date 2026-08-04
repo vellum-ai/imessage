@@ -102,30 +102,25 @@ reports the channel as running once the project ID and secret resolve.
 
 ## 4. Inbound
 
-Inbound is webhook-first. Register the endpoint with the provider — Comms takes
-`POST /webhooks`, Photon takes `POST /projects/{projectId}/webhooks/` and
-returns a signing secret **once** — pointing at:
-
-```
-<public ingress URL>/webhooks/plugins/imessage/events
-```
-
-Get the base with `assistant config get ingress.publicBaseUrl` — never hardcode
-a host. The gateway verifies the delivery signature before the plugin sees it,
-so there is nothing to configure plugin-side for that. A guardian must approve
-the plugin's ingress declaration before the gateway serves the route.
-
-If the deployment's gateway is not reachable from the internet (self-hosted
-behind NAT), switch to polling in the plugin's `config.json`:
+**Use polling.** It is the ingress that works end to end today:
 
 ```json
 { "ingressMode": "poll", "pollIntervalMs": 5000 }
 ```
 
-Polling needs `comms_read`, runs in its own worker process, and starts from the
-moment it is enabled rather than replaying the line's history. It costs latency
-and burns requests while the line is quiet, so prefer webhooks where the
-deployment allows them.
+Polling needs `comms_read` on Comms, runs in its own worker process, and starts
+from the moment it is enabled rather than replaying the line's history. It
+costs latency and burns requests while the line is quiet.
+
+Webhooks would be preferable and the plugin already registers them — on every
+webhook-mode start it points the provider at
+`<ingress.publicBaseUrl>/webhooks/plugins/imessage/events`, which needs
+`assistant config get ingress.publicBaseUrl` to be set and a guardian to have
+approved the plugin's ingress declaration. **But the gateway refuses those
+deliveries.** It verifies a `Vellum-Signature` HMAC computed with the plugin's
+own `webhook_secret`, and neither Comms nor Photon can send that header, so
+every delivery is a 403 before the plugin sees it. Do not spend a setup session
+debugging that — it is a gateway-side gap, tracked in `AGENTS.md`.
 
 ## Configuration
 
@@ -155,10 +150,9 @@ both from the dashboard rather than guessing which one drifted.
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.
 
-**Sends work, nothing arrives** — in webhook mode the endpoint is not
-registered, the registered URL no longer matches `ingress.publicBaseUrl` (a
-changed tunnel URL is the usual cause), or the guardian has not approved the
-ingress declaration. In poll mode the key lacks `comms_read`.
+**Sends work, nothing arrives** — in webhook mode this is expected: the gateway
+rejects provider deliveries (see step 4). Switch to poll. In poll mode, check
+that the key carries `comms_read`.
 
 **Messages sent before setup do not appear** — expected. The channel starts from
 the moment of setup rather than replaying history.

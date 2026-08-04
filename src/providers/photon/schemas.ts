@@ -88,6 +88,22 @@ export const TokenResponseSchema = z.union([
 ]);
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 
+/**
+ * `GET /projects/{projectId}/webhooks/` and `POST` of the same.
+ *
+ * `signingSecret` comes back only from the POST and is never retrievable
+ * afterwards. It is deliberately not modelled: nothing in this plugin can use
+ * it — the gateway verifies deliveries against its own scheme — and a field
+ * that looks storable but is not invites someone to try.
+ */
+export const PhotonWebhookSchema = z.looseObject({
+  id: softString,
+  webhookUrl: softString,
+});
+export type PhotonWebhook = z.infer<typeof PhotonWebhookSchema>;
+
+export const ListWebhooksResponseSchema = z.array(PhotonWebhookSchema);
+
 /* ------------------------------------------------------------------ *
  * Message plane
  * ------------------------------------------------------------------ */
@@ -192,8 +208,8 @@ export const WebhookEventSchema = z.looseObject({
 });
 export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
 
-/** Event names that carry a message from a human. */
-const INBOUND_EVENT_NAMES = new Set(["messages", "message.received"]);
+/** The only event Photon delivers today. */
+const INBOUND_EVENT_NAMES = new Set(["messages"]);
 
 export function isInboundMessageEvent(event: WebhookEvent): boolean {
   if (event.event && !INBOUND_EVENT_NAMES.has(event.event)) return false;

@@ -21,6 +21,7 @@ import type {
   MessagingProvider,
   SendResult,
   SendTarget,
+  WebhookRegistration,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 
@@ -72,6 +73,16 @@ export function createPhotonProvider(): MessagingProvider {
         // provider-agnostic: it never sees a Photon-shaped payload.
         event: normalizePhotonMessage(message, new Date().toISOString()),
       }));
+    },
+
+    async ensureWebhook(url: string): Promise<WebhookRegistration> {
+      const existing = (await client.listWebhooks()).find(
+        (hook) => hook.webhookUrl === url,
+      );
+      if (existing) return { created: false, id: existing.id };
+
+      const created = await client.createWebhook(url);
+      return { created: true, id: created?.id };
     },
 
     /**

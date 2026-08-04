@@ -13,6 +13,7 @@
 
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
+import type { RuntimeContext } from "./plugin-state.ts";
 import {
   getInitContext,
   getSupervisor,
@@ -22,6 +23,8 @@ import {
   setSupervisor,
 } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
+import type { MessagingProvider } from "./providers/types.ts";
+import { resolveWebhookEndpoint } from "./webhook-endpoint.ts";
 import { PollWorkerSupervisor } from "./worker/supervisor.ts";
 
 /**
@@ -33,11 +36,9 @@ import { PollWorkerSupervisor } from "./worker/supervisor.ts";
  * - `not-loaded` — this process has no plugin runtime to restart. The config
  *   write still happened and takes effect when the plugin next loads.
  *
- * The third case used to report itself as idle with the reason "plugin is not
- * initialized", which read to a user clicking a provider button as though
- * their channel had just broken. It had not: nothing was running in *this*
- * process to restart. Separating the two is what lets the settings app say
- * "saved, applies on reload" instead of raising an alarm.
+ * `not-loaded` is kept apart from `idle` because nothing is wrong in that
+ * case: the app can say "saved, applies on reload" rather than raising an
+ * alarm about a channel nobody broke.
  */
 export type ChannelStatus = "running" | "idle" | "not-loaded";
 
@@ -45,6 +46,47 @@ export interface StartRuntimeResult {
   status: ChannelStatus;
   /** Why the channel is idle. Only set when `status` is `idle`. */
   idleReason?: string;
+}
+
+/**
+ * Point the provider's webhook at this plugin's ingress route.
+ *
+ * Runs on every webhook-mode start, which is what makes a credential saved in
+ * the settings app enough to finish setup: the restart that follows the save
+ * is what registers. `ensureWebhook` lists before it creates, so repeating it
+ * costs one request rather than a duplicate registration.
+ *
+ * Never throws. An unregistered webhook is a channel that hears nothing, not a
+ * channel that failed to load, and taking the daemon's boot down over a
+ * provider's 500 would be the worse trade.
+ */
+async function registerWebhook(
+  provider: MessagingProvider,
+  logger: RuntimeContext["logger"],
+): Promise<void> {
+  const endpoint = resolveWebhookEndpoint();
+  if (!endpoint.ok) {
+    logger.warn(
+      { provider: provider.id, reason: endpoint.reason },
+      "imessage: no webhook could be registered — inbound will not arrive until ingress.publicBaseUrl is set or ingressMode is 'poll'",
+    );
+    return;
+  }
+
+  try {
+    const result = await provider.ensureWebhook(endpoint.url);
+    logger.info(
+      { provider: provider.id, url: endpoint.url, created: result.created },
+      result.created
+        ? "imessage: registered the inbound webhook with the provider"
+        : "imessage: provider webhook already registered",
+    );
+  } catch (err) {
+    logger.warn(
+      { err, provider: provider.id, url: endpoint.url },
+      "imessage: could not register the inbound webhook — the channel is running but will not hear anything",
+    );
+  }
 }
 
 /**
@@ -101,6 +143,11 @@ export function startChannelRuntime(
       { provider: provider.id },
       `imessage: webhook ingress — inbound arrives at /webhooks/plugins/${ctx.pluginName}/events`,
     );
+    // Deliberately not awaited: registration is a network round trip to the
+    // provider, and neither plugin boot nor a settings save should block on
+    // it. A failure leaves the channel running — outbound still works, and
+    // inbound was not going to arrive either way.
+    void registerWebhook(provider, ctx.logger);
     return { status: "running" };
   }
 

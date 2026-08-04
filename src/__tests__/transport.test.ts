@@ -33,6 +33,9 @@ function stubProvider(send?: () => Promise<SendResult>): {
     async fetchInbound() {
       return [];
     },
+    async ensureWebhook() {
+      return { created: false };
+    },
     async send(target, body, opts) {
       sends.push({ target, body, idempotencyKey: opts.idempotencyKey });
       return send ? await send() : { id: "msg_out" };

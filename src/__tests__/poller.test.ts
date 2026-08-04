@@ -71,6 +71,9 @@ function stubProvider(
     async checkReadiness() {
       return { ready: true };
     },
+    async ensureWebhook() {
+      return { created: false };
+    },
     async fetchInbound(opts: FetchInboundOptions) {
       calls.push(opts);
       return pages[index++] ?? [];

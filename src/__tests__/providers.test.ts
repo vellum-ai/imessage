@@ -464,3 +464,111 @@ describe("photon provider", () => {
     expect(createPhotonProvider().supportsPolling).toBe(true);
   });
 });
+
+describe("webhook registration", () => {
+  test("comms registers for message.received only", async () => {
+    // Registering for message.sent would deliver our own replies back, and the
+    // normalizer would drop every one of them.
+    stubFetch(() => Response.json({ webhooks: [] }));
+    const result = await createCommsProvider().ensureWebhook(
+      "https://host.example/webhooks/plugins/imessage/events",
+    );
+
+    expect(result.created).toBe(true);
+    expect(calls.map((c) => c.init.method)).toEqual(["GET", "POST"]);
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
+      url: "https://host.example/webhooks/plugins/imessage/events",
+      events: ["message.received"],
+    });
+  });
+
+  test("comms does not re-register an existing url", async () => {
+    // Called on every webhook-mode start, so creating blindly would pile up
+    // registrations and deliver each message several times.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({
+            webhooks: [
+              { id: "wh_1", url: "https://host.example/other" },
+              { id: "wh_2", url: "https://host.example/mine" },
+            ],
+          })
+        : Response.json({}),
+    );
+
+    const result = await createCommsProvider().ensureWebhook(
+      "https://host.example/mine",
+    );
+
+    expect(result).toEqual({ created: false, id: "wh_2" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("comms reads a listing that came back bare", async () => {
+    // The docs pin the POST body and say nothing about the listing envelope.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json([{ id: "wh_9", webhook_url: "https://host.example/mine" }])
+        : Response.json({}),
+    );
+
+    expect(
+      await createCommsProvider().ensureWebhook("https://host.example/mine"),
+    ).toEqual({ created: false, id: "wh_9" });
+  });
+
+  test("photon registers through the control plane", async () => {
+    stubPhoton((call) =>
+      call.path.includes("/webhooks/")
+        ? Response.json({
+            succeed: true,
+            data:
+              call.init.method === "GET"
+                ? []
+                : { id: "wh_p", webhookUrl: "https://host.example/mine" },
+          })
+        : undefined,
+    );
+
+    const result = await createPhotonProvider().ensureWebhook(
+      "https://host.example/mine",
+    );
+
+    expect(result).toEqual({ created: true, id: "wh_p" });
+    expect(calls[0]?.path).toBe(
+      `${PHOTON_CLOUD_BASE}/projects/test-key/webhooks/`,
+    );
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
+      webhookUrl: "https://host.example/mine",
+    });
+  });
+
+  test("photon does not re-register an existing url", async () => {
+    stubPhoton((call) =>
+      call.path.includes("/webhooks/")
+        ? Response.json({
+            succeed: true,
+            data: [{ id: "wh_p", webhookUrl: "https://host.example/mine" }],
+          })
+        : undefined,
+    );
+
+    expect(
+      await createPhotonProvider().ensureWebhook("https://host.example/mine"),
+    ).toEqual({ created: false, id: "wh_p" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("photon registration needs no message-plane token", async () => {
+    // Webhooks are control-plane, so minting a message-plane token for one
+    // would be a round trip that buys nothing.
+    stubPhoton((call) =>
+      call.path.includes("/webhooks/")
+        ? Response.json({ succeed: true, data: [] })
+        : undefined,
+    );
+
+    await createPhotonProvider().ensureWebhook("https://host.example/mine");
+    expect(calls.some((c) => c.path.includes("/imessage/tokens"))).toBe(false);
+  });
+});

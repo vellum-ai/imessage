@@ -127,6 +127,46 @@ export function isInboundMessageEvent(event: WebhookEvent): boolean {
   return messageFromWebhookEvent(event)?.direction === "inbound";
 }
 
+/**
+ * A registered webhook, as `GET /webhooks` reports it.
+ *
+ * The docs give `POST /webhooks` its request shape (`{ url, events }`) but not
+ * what a listing returns, so the url is accepted under several spellings.
+ * Getting this wrong means `ensureWebhook` never matches an existing
+ * registration and registers a duplicate on every start, which is why the
+ * candidates are wide rather than a single guess.
+ */
+export const CommsWebhookSchema = z.looseObject({
+  id: softString,
+  url: softString,
+  webhook_url: softString,
+  webhookUrl: softString,
+  events: z.array(z.string()).optional().catch(undefined),
+});
+export type CommsWebhook = z.infer<typeof CommsWebhookSchema>;
+
+/** `GET /webhooks`, which may answer with a bare array or a wrapped one. */
+export const ListWebhooksResponseSchema = z.union([
+  z.array(CommsWebhookSchema),
+  z.looseObject({
+    webhooks: z.array(CommsWebhookSchema).optional().catch(undefined),
+    data: z.array(CommsWebhookSchema).optional().catch(undefined),
+  }),
+]);
+
+/** Registered webhooks out of whichever envelope the listing used. */
+export function webhooksFromListing(raw: unknown): CommsWebhook[] {
+  const parsed = ListWebhooksResponseSchema.safeParse(raw);
+  if (!parsed.success) return [];
+  if (Array.isArray(parsed.data)) return parsed.data;
+  return parsed.data.webhooks ?? parsed.data.data ?? [];
+}
+
+/** The registered URL, whichever spelling the wire uses. */
+export function webhookUrlOf(hook: CommsWebhook): string | undefined {
+  return pickFirstString(hook.url, hook.webhook_url, hook.webhookUrl);
+}
+
 /** First non-empty value among several candidate spellings. */
 export function pickFirstString(
   ...values: (string | undefined)[]

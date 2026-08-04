@@ -60,14 +60,6 @@ export const PROVIDER_CREDENTIALS: Record<
   ProviderId,
   readonly CredentialField[]
 > = {
-  comms: [
-    {
-      field: API_KEY_FIELD,
-      label: "API Key",
-      placeholder: "Enter your Comms API key",
-      secret: true,
-    },
-  ],
   photon: [
     {
       field: "photon_project_id",
@@ -79,6 +71,14 @@ export const PROVIDER_CREDENTIALS: Record<
       field: "photon_project_secret",
       label: "Project Secret",
       placeholder: "Enter your Photon project secret",
+      secret: true,
+    },
+  ],
+  comms: [
+    {
+      field: API_KEY_FIELD,
+      label: "API Key",
+      placeholder: "Enter your Comms API key",
       secret: true,
     },
   ],
@@ -97,8 +97,8 @@ export const PROVIDER_CREDENTIALS: Record<
  * delivery from verifying.
  */
 export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
-  comms: "comms_webhook_token",
   photon: "photon_webhook_secret",
+  comms: "comms_webhook_token",
 };
 
 /**
@@ -121,8 +121,8 @@ export const WEBHOOK_VERIFICATION: Record<
   ProviderId,
   "hmac" | "shared-secret"
 > = {
-  comms: "shared-secret",
   photon: "hmac",
+  comms: "shared-secret",
 };
 
 /**
@@ -147,9 +147,9 @@ const MAX_POLL_INTERVAL_MS = 300_000;
 export const IMessageConfigSchema = z.object({
   provider: z
     .enum(PROVIDER_IDS)
-    .default("comms")
+    .default("photon")
     .describe(
-      "Which provider backs the line: 'comms' (your own Comms by Osis account, the default) or 'photon' (your own Photon project).",
+      "Which provider backs the line: 'photon' (your own Photon project, the default) or 'comms' (your own Comms by Osis account).",
     ),
   ingressMode: z
     .enum(INGRESS_MODES)

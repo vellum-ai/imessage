@@ -26,9 +26,7 @@ economics are unresolved. Do not write user-facing copy that offers one.
 The channel is provider-agnostic above `src/providers/types.ts`. Two providers,
 both bring-your-own:
 
-- **`comms`** (default) — the user's own Comms by Osis workspace, API key, and
-  line. One REST API, one credential, both directions.
-- **`photon`** — the user's own Photon (Spectrum) project. Two hosts rather
+- **`photon`** (default) — the user's own Photon (Spectrum) project. Two hosts rather
   than one: a **control plane** at `spectrum.photon.codes` authenticated with
   `Basic base64(projectId:projectSecret)`, and a **message plane** at
   `imessage.spectrum.photon.codes` authenticated with a short-lived token
@@ -36,6 +34,8 @@ both bring-your-own:
   until shortly before it expires, and a 401 drops it and retries once. All of
   that lives in `src/providers/photon/client.ts` and nothing above the seam
   knows there are two hosts.
+- **`comms`** — the user's own Comms by Osis workspace, API key, and line. One
+  REST API, one credential, both directions.
 
 Photon addresses a conversation by **chat guid** (`any;-;+15551234567`), not by
 phone number. A reply already has one — the webhook's `space.id` is exactly
@@ -112,20 +112,28 @@ that no longer names it.
 Two callers, one set of rules.
 
 - **The `imessage` skill** (`skills/imessage/`) is how the assistant sends
-  deliberately. `scripts/send.ts` runs as a standalone bun process, so it
-  resolves the API key via `assistant credentials reveal` rather than the
-  in-process credential API. **It speaks Comms only.** The provider seam lives
-  in-process and a standalone script cannot reach it, so rather than sending
-  over a line the user did not configure, it reads `provider` out of
-  `config.json` and refuses when that is not `comms`. Teaching it a second
-  provider means giving the adapters a credential source that works outside the
-  daemon — worth doing, and not a one-line change.
+  deliberately. `scripts/send.ts` runs as a standalone bun process and **uses
+  the same adapters** — it calls `resolveProvider` and hands the result a
+  chunked body, exactly as the transport does. There is no provider-specific
+  code in the skill, so a new provider is never something anyone has to teach
+  it.
+
+  That works because `@vellumai/plugin-api` resolves to the **workspace shim**
+  the daemon materializes (`ensurePluginApiShim`), which prefers the namespace a
+  host parked on `globalThis` and falls back to importing the plugin-api source
+  directly when no host did — credentials being one of the surfaces that
+  fallback exists for. The installer also strips the `@vellumai/plugin-api`
+  peer for the duration of `bun install` so a registry copy cannot shadow that
+  shim. Both halves matter: without the strip, a plugin-local copy of the
+  published package resolves first, and the published package has no fallback,
+  so every export is `undefined` in a subprocess.
 - **The channel transport** (`src/channel/transport.ts`) is how a reply goes
   back out once the host's inbound pipeline exists.
 
-Both import `src/channel/render.ts`, which is dependency-free for exactly that
-reason: a skill-script send and a channel reply must format identically, and two
-copies of the rules would drift.
+Both go through `src/channel/render.ts` for chunking and idempotency keys, and
+both normalize a recipient through `src/channel/identity.ts`: a skill send and
+a channel reply have to format identically and address the same person the same
+way, and two copies of either rule would drift.
 
 **Long replies are chunked, never truncated.** An earlier version cut at the
 limit and appended an ellipsis, which silently dropped the end of every long
@@ -145,8 +153,8 @@ is what registers.
 
 ### One route per provider
 
-`channels/ingress.json` declares `events/comms` and `events/photon`, each with
-its own handler under `routes/events/`. The provider is a path segment, not a
+`channels/ingress.json` declares `events-photon` and `events-comms`, each with
+its own handler file under `routes/`. The provider is part of the path, not a
 config lookup, and that is the whole point: **which provider signed a delivery
 decides how it must be verified, and the gateway reads only its own static
 manifest.** Putting the provider in the URL lets a static declaration describe
@@ -163,8 +171,10 @@ retry or disable a webhook whose only problem is that it is out of date.
 
 Each route carries a `verification` descriptor saying how the gateway should
 check a delivery — algorithm, which credential field holds the secret, where
-the signature is, and exactly which bytes it covers. `docs/ingress-verification.md`
-is the spec, written to be implemented gateway-side.
+the signature is, and exactly which bytes it covers. The manifest is the spec:
+it is declarative on purpose, so a third vendor is a manifest edit rather than
+gateway code. Two kinds exist because the two vendors need both — `hmac` for
+one that signs, `shared-secret` for one that does not.
 
 The two providers need different answers, which is why the descriptor is data:
 
@@ -202,11 +212,6 @@ to end** in the meantime; both providers support it. It runs in **its own
 worker process** (`src/worker/`), not the daemon: a busy line or a slow
 provider must not compete with the assistant's event loop, and a crash in the
 loop must not take the daemon down. The supervisor restarts it with backoff.
-
-**The plugin does not verify signatures itself**, and the proposal exists so
-that stays true. Two implementations of one scheme is one of them being subtly
-wrong, and the route handler should only ever run on deliveries the gateway
-already authenticated.
 
 ## Credentials
 

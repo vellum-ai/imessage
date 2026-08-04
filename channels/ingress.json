@@ -1,38 +1,50 @@
 {
   "routes": [
     {
-      "path": "events/comms",
-      "kind": "http",
-      "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received).",
-      "verification": {
-        "kind": "shared-secret",
-        "secret": { "field": "comms_webhook_token" },
-        "carrier": { "query": "token" }
-      }
-    },
-    {
-      "path": "events/photon",
+      "path": "events-photon",
       "kind": "http",
       "description": "Inbound message webhooks from a Photon (Spectrum) project (messages).",
       "verification": {
         "kind": "hmac",
         "algorithm": "sha256",
-        "secret": { "field": "photon_webhook_secret" },
+        "secret": {
+          "field": "photon_webhook_secret"
+        },
         "signature": {
           "header": "X-Spectrum-Signature",
           "encoding": "hex",
           "prefix": "v0="
         },
         "payload": [
-          { "literal": "v0:" },
-          { "header": "X-Spectrum-Timestamp" },
-          { "literal": ":" },
+          {
+            "literal": "v0:"
+          },
+          {
+            "header": "X-Spectrum-Timestamp"
+          },
+          {
+            "literal": ":"
+          },
           "body"
         ],
         "freshness": {
           "header": "X-Spectrum-Timestamp",
           "format": "unix-seconds",
           "toleranceSeconds": 300
+        }
+      }
+    },
+    {
+      "path": "events-comms",
+      "kind": "http",
+      "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received).",
+      "verification": {
+        "kind": "shared-secret",
+        "secret": {
+          "field": "comms_webhook_token"
+        },
+        "carrier": {
+          "query": "token"
         }
       }
     }

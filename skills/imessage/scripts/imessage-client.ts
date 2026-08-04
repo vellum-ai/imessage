@@ -1,183 +1,60 @@
 /**
- * Comms client for the `imessage` skill's scripts.
+ * Outbound send for the `imessage` skill's scripts.
  *
- * Runs as a standalone bun process, so it cannot reach plugin state or the
- * in-process credential API. The API key is resolved at runtime via
- * `assistant credentials reveal` and never read from an environment variable:
- * an env var holding the key would leak through the assistant's bash tool.
+ * This runs as a standalone bun process and still uses the plugin's own
+ * provider adapters. That works because `@vellumai/plugin-api` resolves to the
+ * workspace shim the daemon materializes, which prefers the namespace a host
+ * parked on `globalThis` and **falls back to importing the plugin-api source
+ * directly when no host did** — credentials are one of the surfaces that
+ * fallback exists for. The plugin installer also strips the `plugin-api` peer
+ * during install precisely so a registry copy cannot shadow that shim.
  *
- * Rendering rules (markdown flattening, chunking, idempotency keys) are
- * imported from `src/channel/render.ts` rather than reimplemented, so a
- * skill-script send and a channel-reply send format identically. That module is
- * dependency-free for exactly this reason.
+ * So nothing here is provider-specific: which line a message goes out over is
+ * `resolveProvider`'s answer, the same one the channel transport gets, and
+ * teaching this script a new provider is not a thing anyone has to do.
+ * Everything below is the part a *script* owns — reading the configured
+ * provider, normalizing the recipient, and reporting partial delivery.
  */
 
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
+import { readConfigView } from "../../../src/app-settings.ts";
+import { normalizeHandle } from "../../../src/channel/identity.ts";
 import {
   chunkForDelivery,
   idempotencyKey,
 } from "../../../src/channel/render.ts";
-
-const COMMS_API_BASE = "https://osis.co/api/v1/comms";
-
-/** Human-facing credential name. The CLI takes service and field separately. */
-const CREDENTIAL_SERVICE = "imessage";
-const CREDENTIAL_FIELD = "api_key";
-
-/** E.164: a leading `+` then 7 to 15 digits. */
-const E164_RE = /^\+[1-9]\d{6,14}$/;
-
-/**
- * Refuse to send when the channel is configured for another provider.
- *
- * This script only speaks Comms. The channel itself is provider-agnostic, but
- * that seam lives in-process and this runs as a standalone bun process with no
- * access to it. Sending anyway would put the message out over a line the user
- * did not configure — or, more likely, fail on a credential that was never
- * meant for Comms and report it as a Comms problem.
- *
- * `config.json` is read directly rather than through `src/config.ts`, which
- * would drag in `@vellumai/plugin-api` for a value that is one `JSON.parse`
- * away. A missing or unreadable file reads as the default, which is Comms.
- */
-function assertCommsIsConfigured(): void {
-  const configPath = join(
-    new URL(".", import.meta.url).pathname,
-    "..",
-    "..",
-    "..",
-    "config.json",
-  );
-
-  let provider = "comms";
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(configPath, "utf-8"));
-    if (parsed && typeof parsed === "object") {
-      const configured = (parsed as { provider?: unknown }).provider;
-      if (typeof configured === "string" && configured.length > 0) {
-        provider = configured;
-      }
-    }
-  } catch {
-    // No config, or an unreadable one: the plugin's own default is Comms.
-  }
-
-  if (provider !== "comms") {
-    throw new Error(
-      `The iMessage channel is configured for the "${provider}" provider, and this ` +
-        "script can only send over Comms. Send through the channel itself, or " +
-        "switch the provider to comms in the iMessage settings app.",
-    );
-  }
-}
+import { pluginConfigPath } from "../../../src/plugin-paths.ts";
+import { resolveProvider } from "../../../src/providers/index.ts";
 
 export interface SentChunk {
   id: string;
   body: string;
 }
 
-/**
- * Resolve the Comms API key from the credential store.
- *
- * `execFileSync` rather than `execSync` so nothing here goes through a shell.
- */
-export function getApiKey(): string {
-  try {
-    const key = execFileSync(
-      "assistant",
-      [
-        "credentials",
-        "reveal",
-        "--service",
-        CREDENTIAL_SERVICE,
-        "--field",
-        CREDENTIAL_FIELD,
-      ],
-      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-    ).trim();
-    if (!key) throw new Error("empty credential");
-    return key;
-  } catch {
-    throw new Error(
-      "No Comms API key found in the credential store.\n" +
-        `Store one with: assistant credentials set --service ${CREDENTIAL_SERVICE} ` +
-        `--field ${CREDENTIAL_FIELD} <your_key>\n` +
-        "Load the imessage-setup skill to walk through getting a key.",
-    );
-  }
-}
-
-/**
- * Normalize a handle to E.164, or throw with what is wrong.
- *
- * Only the unambiguous cases are normalized: an already-E.164 number, and a
- * bare 10- or 11-digit North American number. Anything else is rejected rather
- * than guessed at, because guessing a country code is how one person ends up
- * as two contacts.
- */
-export function normalizeRecipient(raw: string): string {
-  const trimmed = raw.trim();
-  if (E164_RE.test(trimmed)) return trimmed;
-
-  const digits = trimmed.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-
-  throw new Error(
-    `"${raw}" is not a recipient this channel can address. ` +
-      "Use E.164, e.g. +15551234567.",
-  );
-}
-
-/**
- * Send one message body, already chunked and flattened.
- *
- * Always carries an idempotency key: a retried send after a timeout delivers
- * twice, and on a real phone line the recipient sees both.
- */
-async function sendOne(
-  apiKey: string,
-  to: string,
-  body: string,
-  channel: string | undefined,
-  sequence: number,
-): Promise<string> {
-  const response = await fetch(`${COMMS_API_BASE}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey(to, body, sequence),
-    },
-    body: JSON.stringify({
-      to,
-      body,
-      ...(channel ? { channel } : {}),
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Comms rejected the send (${response.status}): ${detail.slice(0, 300)}`,
-    );
-  }
-
-  const parsed = (await response.json().catch(() => ({}))) as {
-    message?: { id?: unknown };
-  };
-  const id = parsed.message?.id;
-  return typeof id === "string" ? id : "";
-}
-
 export interface SendOptions {
   to: string;
   body: string;
-  /** Force `sms` or `imessage`; omit to let Comms choose. */
-  channel?: string;
+  /** Force `sms` or `imessage` where the provider honors it. */
+  channel?: "sms" | "imessage";
+}
+
+/**
+ * Normalize a recipient, or throw with what is wrong.
+ *
+ * Delegates to the channel's own normalizer so a handle means the same thing
+ * to a skill send as it does to an inbound turn — two normalizers is how one
+ * person becomes two contacts. The throw is this layer's contribution: a
+ * script has someone waiting on an answer, so "not a recipient" has to say
+ * what to type instead.
+ */
+export function normalizeRecipient(raw: string): string {
+  const normalized = normalizeHandle(raw);
+  if (!normalized) {
+    throw new Error(
+      `"${raw}" is not a recipient this channel can address. ` +
+        "Use E.164, e.g. +15551234567.",
+    );
+  }
+  return normalized;
 }
 
 /**
@@ -188,20 +65,28 @@ export interface SendOptions {
  * of order.
  */
 export async function sendMessage(opts: SendOptions): Promise<SentChunk[]> {
-  assertCommsIsConfigured();
+  const config = readConfigView(pluginConfigPath());
+  // `--channel` is the same knob as the `sendChannel` config field, so it
+  // rides in as a config override rather than as a second path through the
+  // provider.
+  const provider = resolveProvider({
+    config: opts.channel ? { ...config, sendChannel: opts.channel } : config,
+  });
+
   const to = normalizeRecipient(opts.to);
   const chunks = chunkForDelivery(opts.body);
   if (chunks.length === 0) {
     throw new Error("Message body is empty after formatting.");
   }
 
-  const apiKey = getApiKey();
   const sent: SentChunk[] = [];
 
   for (const [index, chunk] of chunks.entries()) {
     try {
-      const id = await sendOne(apiKey, to, chunk, opts.channel, index);
-      sent.push({ id, body: chunk });
+      const result = await provider.send({ to }, chunk, {
+        idempotencyKey: idempotencyKey(to, chunk, index),
+      });
+      sent.push({ id: result.id ?? "", body: chunk });
     } catch (err) {
       if (sent.length > 0) {
         // Partial delivery is the dangerous case to hide: the recipient has

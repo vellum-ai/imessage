@@ -34,6 +34,17 @@ function isChatGuid(value: string): boolean {
 export function createPhotonProvider(): MessagingProvider {
   const client = new PhotonClient();
 
+  /**
+   * Chat guids resolved for a bare handle, for this provider's lifetime.
+   *
+   * A long reply is several sends to the same recipient — the skill script and
+   * the transport both chunk — and without this each chunk would re-resolve
+   * the same chat before it could go out. Same reasoning as the client's token
+   * cache: a guid is stable for a set of participants, and a wrong one
+   * surfaces immediately as a failed send rather than as a silent misdelivery.
+   */
+  const chatGuids = new Map<string, string>();
+
   return {
     id: "photon",
     label: "Photon (your own project)",
@@ -121,23 +132,28 @@ export function createPhotonProvider(): MessagingProvider {
     ): Promise<SendResult> {
       const addressed =
         "conversationId" in target ? target.conversationId : target.to;
+      const known = isChatGuid(addressed)
+        ? addressed
+        : chatGuids.get(addressed);
 
-      if (isChatGuid(addressed)) {
+      if (known) {
         const message = await client.sendText({
-          chatGuid: addressed,
+          chatGuid: known,
           text: body,
           clientMessageId: sendOpts.idempotencyKey,
         });
         return { id: message?.guid };
       }
 
-      // A handle with no chat yet: create-or-resolve the chat and send the
-      // opening message in the same call rather than paying two round trips.
+      // A handle with no chat resolved yet: create-or-resolve the chat and
+      // send the opening message in the same call rather than paying two round
+      // trips.
       const created = await client.createChat({
         addresses: [addressed],
         clientMessageId: sendOpts.idempotencyKey,
         text: body,
       });
+      if (created.chatGuid) chatGuids.set(addressed, created.chatGuid);
 
       if (created.message) return { id: created.message.guid };
 

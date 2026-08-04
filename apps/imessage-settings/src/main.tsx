@@ -54,18 +54,6 @@ interface ProviderCatalogEntry {
  */
 const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
-    id: "comms",
-    displayName: "Comms by Osis",
-    subtitle:
-      "Your own Comms workspace and line. One API key covers sending and receiving.",
-    credentialsGuide: {
-      description:
-        "Sign in to Comms by Osis, provision a line, and mint a Messages API key with the comms_send and comms_read scopes. Scopes are fixed at creation — a key missing one has to be replaced.",
-      url: "https://comms.osis.co",
-      linkLabel: "Open Comms by Osis",
-    },
-  },
-  {
     id: "photon",
     displayName: "Photon",
     subtitle:
@@ -75,6 +63,18 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         "Sign in to the Photon dashboard, open your project, and copy its project ID and project secret. The line comes from the project — there is nothing to provision separately.",
       url: "https://photon.codes",
       linkLabel: "Open Photon Dashboard",
+    },
+  },
+  {
+    id: "comms",
+    displayName: "Comms by Osis",
+    subtitle:
+      "Your own Comms workspace and line. One API key covers sending and receiving.",
+    credentialsGuide: {
+      description:
+        "Sign in to Comms by Osis, provision a line, and mint a Messages API key with the comms_send and comms_read scopes. Scopes are fixed at creation — a key missing one has to be replaced.",
+      url: "https://comms.osis.co",
+      linkLabel: "Open Comms by Osis",
     },
   },
 ];

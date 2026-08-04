@@ -87,7 +87,7 @@ describe("startChannelRuntime", () => {
     // schema rejects has to come up on the default, not refuse to load.
     const { config, warnings } = resolveConfig({ provider: "not-a-provider" });
 
-    expect(config.provider).toBe("comms");
+    expect(config.provider).toBe("photon");
     expect(warnings.join(" ")).toContain("provider");
   });
 
@@ -99,7 +99,7 @@ describe("startChannelRuntime", () => {
 
     expect(result.status).toBe("running");
     expect(result.idleReason).toBeUndefined();
-    expect(getProvider()?.id).toBe("comms");
+    expect(getProvider()?.id).toBe("photon");
     expect(getChannel()?.channel).toBe("imessage");
   });
 
@@ -111,7 +111,7 @@ describe("startChannelRuntime", () => {
     const second = startChannelRuntime(config);
 
     expect(second.status).toBe("running");
-    expect(getProvider()?.id).toBe("comms");
+    expect(getProvider()?.id).toBe("photon");
   });
 
   test("a provider that cannot be built leaves the channel idle", () => {
@@ -129,7 +129,7 @@ describe("startChannelRuntime", () => {
     // config no longer names, while the settings app reported the new one.
     withContext();
     startChannelRuntime(IMessageConfigSchema.parse({ ingressMode: "webhook" }));
-    expect(getProvider()?.id).toBe("comms");
+    expect(getProvider()?.id).toBe("photon");
 
     const result = startChannelRuntime(configNamingMissingProvider());
 
@@ -147,7 +147,7 @@ describe("startChannelRuntime", () => {
     startChannelRuntime(config);
 
     expect(getChannel()).not.toBe(first);
-    expect(getProvider()?.id).toBe("comms");
+    expect(getProvider()?.id).toBe("photon");
   });
 });
 
@@ -163,6 +163,6 @@ describe("stopIngress", () => {
       IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
     stopIngress();
-    expect(getProvider()?.id).toBe("comms");
+    expect(getProvider()?.id).toBe("photon");
   });
 });

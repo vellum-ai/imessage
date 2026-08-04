@@ -16,7 +16,7 @@ import { IMessageConfigSchema } from "../config.ts";
 import { resetPluginState, setConfig } from "../plugin-state.ts";
 
 function post(body: unknown): Request {
-  return new Request("http://localhost/x/plugins/imessage/events/comms", {
+  return new Request("http://localhost/x/plugins/imessage/events-comms", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

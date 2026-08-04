@@ -57,12 +57,32 @@ export interface SendResult {
   id?: string;
 }
 
+export interface EnsureWebhookOptions {
+  /** Absolute URL the provider should deliver to. */
+  url: string;
+  /**
+   * Whether the plugin already holds this provider's signing secret.
+   *
+   * Load-bearing for a provider that issues one exactly once: a registration
+   * that exists while the secret is lost can only be replaced, because nothing
+   * can verify its deliveries.
+   */
+  hasSecret: boolean;
+}
+
 /** What `ensureWebhook` found or did. */
 export interface WebhookRegistration {
-  /** False when a registration for that URL was already there. */
+  /** False when a usable registration for that URL was already there. */
   created: boolean;
   /** Provider-side id, when the provider returned one. */
   id?: string;
+  /**
+   * Signing secret the provider issued, for the caller to store.
+   *
+   * Present only on the call that created the registration, because that is
+   * the only time a provider hands one over.
+   */
+  secret?: string;
 }
 
 /**
@@ -90,7 +110,7 @@ export interface MessagingProvider {
   fetchInbound(opts: FetchInboundOptions): Promise<InboundRecord[]>;
 
   /**
-   * Point the provider's webhook at `url`, if it is not already.
+   * Point the provider's webhook at `opts.url`, if it is not already.
    *
    * Registering is the plugin's job, not the gateway's: the gateway serves the
    * route but never holds provider credentials, so nothing else in the system
@@ -100,7 +120,7 @@ export interface MessagingProvider {
    * every start in webhook mode, so a create-blindly implementation would pile
    * up duplicate registrations and deliver every message several times.
    */
-  ensureWebhook(url: string): Promise<WebhookRegistration>;
+  ensureWebhook(opts: EnsureWebhookOptions): Promise<WebhookRegistration>;
 
   send(
     target: SendTarget,

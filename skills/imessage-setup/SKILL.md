@@ -113,14 +113,14 @@ from the moment it is enabled rather than replaying the line's history. It
 costs latency and burns requests while the line is quiet.
 
 Webhooks would be preferable and the plugin already registers them — on every
-webhook-mode start it points the provider at
-`<ingress.publicBaseUrl>/webhooks/plugins/imessage/events`, which needs
-`assistant config get ingress.publicBaseUrl` to be set and a guardian to have
-approved the plugin's ingress declaration. **But the gateway refuses those
-deliveries.** It verifies a `Vellum-Signature` HMAC computed with the plugin's
-own `webhook_secret`, and neither Comms nor Photon can send that header, so
-every delivery is a 403 before the plugin sees it. Do not spend a setup session
-debugging that — it is a gateway-side gap, tracked in `AGENTS.md`.
+webhook-mode start it points the provider at its own route,
+`<ingress.publicBaseUrl>/webhooks/plugins/imessage/events/<provider>`, which
+needs `assistant config get ingress.publicBaseUrl` to be set and a guardian to
+have approved the plugin's ingress declaration. **But the gateway refuses those
+deliveries** until it implements the verification descriptors the plugin
+declares: today it checks a `Vellum-Signature` header neither vendor can send,
+so every delivery is a 403 before the plugin sees it. Do not spend a setup
+session debugging that — see `docs/ingress-verification.md`.
 
 ## Configuration
 

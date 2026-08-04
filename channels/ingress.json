@@ -1,9 +1,40 @@
 {
   "routes": [
     {
-      "path": "events",
+      "path": "events/comms",
       "kind": "http",
-      "description": "Inbound message webhooks from the configured provider's line — Comms by Osis (message.received) or Photon (messages). Signature-verified; rejects every delivery when no signing secret is stored."
+      "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received).",
+      "verification": {
+        "kind": "shared-secret",
+        "secret": { "field": "comms_webhook_token" },
+        "carrier": { "query": "token" }
+      }
+    },
+    {
+      "path": "events/photon",
+      "kind": "http",
+      "description": "Inbound message webhooks from a Photon (Spectrum) project (messages).",
+      "verification": {
+        "kind": "hmac",
+        "algorithm": "sha256",
+        "secret": { "field": "photon_webhook_secret" },
+        "signature": {
+          "header": "X-Spectrum-Signature",
+          "encoding": "hex",
+          "prefix": "v0="
+        },
+        "payload": [
+          { "literal": "v0:" },
+          { "header": "X-Spectrum-Timestamp" },
+          { "literal": ":" },
+          "body"
+        ],
+        "freshness": {
+          "header": "X-Spectrum-Timestamp",
+          "format": "unix-seconds",
+          "toleranceSeconds": 300
+        }
+      }
     }
   ]
 }

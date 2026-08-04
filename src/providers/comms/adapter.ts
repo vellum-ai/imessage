@@ -9,12 +9,14 @@
 import { CommsClient } from "./client.ts";
 import { normalizeCommsMessage, normalizeWebhookEvent } from "./normalize.ts";
 import {
+  COMMS_INBOUND_EVENT,
   CommsWebhookSchema,
   createdAtOf,
   webhookUrlOf,
   webhooksFromListing,
 } from "./schemas.ts";
 import type {
+  EnsureWebhookOptions,
   FetchInboundOptions,
   InboundRecord,
   MessagingProvider,
@@ -70,17 +72,27 @@ export function createCommsProvider(
     },
 
     /**
-     * `message.received` only. Registering for `message.sent` would deliver
-     * our own replies straight back, and the normalizer would drop every one
-     * of them — traffic and log noise for nothing.
+     * `comms.message.received` only. Registering for `comms.message.sent`
+     * would deliver our own replies straight back, and the normalizer would
+     * drop every one of them — traffic and log noise for nothing.
+     *
+     * Comms issues no signing secret and documents no signature, so the URL
+     * already carries the shared token the gateway checks. Matching on the
+     * full URL therefore also matches on the token: rotate it and this
+     * registers the new URL rather than reusing a registration the gateway
+     * would now reject.
      */
-    async ensureWebhook(url: string): Promise<WebhookRegistration> {
+    async ensureWebhook(
+      opts: EnsureWebhookOptions,
+    ): Promise<WebhookRegistration> {
       const existing = webhooksFromListing(await client.listWebhooks()).find(
-        (hook) => webhookUrlOf(hook) === url,
+        (hook) => webhookUrlOf(hook) === opts.url,
       );
       if (existing) return { created: false, id: existing.id };
 
-      const created = await client.createWebhook(url, ["message.received"]);
+      const created = await client.createWebhook(opts.url, [
+        COMMS_INBOUND_EVENT,
+      ]);
       return {
         created: true,
         id: CommsWebhookSchema.safeParse(created).data?.id,

@@ -91,14 +91,15 @@ export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 /**
  * `GET /projects/{projectId}/webhooks/` and `POST` of the same.
  *
- * `signingSecret` comes back only from the POST and is never retrievable
- * afterwards. It is deliberately not modelled: nothing in this plugin can use
- * it — the gateway verifies deliveries against its own scheme — and a field
- * that looks storable but is not invites someone to try.
+ * `signingSecret` comes back **only** from the POST and is never retrievable
+ * afterwards — the listing omits it. That is why registration stores it
+ * immediately and why a registration whose secret was lost has to be deleted
+ * and recreated rather than reused: nothing can verify its deliveries.
  */
 export const PhotonWebhookSchema = z.looseObject({
   id: softString,
   webhookUrl: softString,
+  signingSecret: softString,
 });
 export type PhotonWebhook = z.infer<typeof PhotonWebhookSchema>;
 

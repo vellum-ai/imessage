@@ -143,50 +143,70 @@ nothing matches, run on every webhook-mode start. That is what makes saving a
 credential in the settings app finish setup — the restart that follows the save
 is what registers.
 
-The address comes from `src/webhook-endpoint.ts`:
-`<ingress.publicBaseUrl>/webhooks/plugins/<plugin>/events`, where the base is
-the assistant's own setting read out of `<workspaceDir>/config.json`. The
-plugin does not carry its own copy — a second setting that has to agree with
-the assistant's is a second setting that can disagree. When the base is empty
-(a Velay-tunnelled deployment keeps the public URL in gateway state, not
-config) registration reports a reason instead of guessing: a wrong URL is worse
-than none, because the provider then reports a healthy webhook pointing
-nowhere.
+### One route per provider
 
-### The gateway will reject provider deliveries today
+`channels/ingress.json` declares `events/comms` and `events/photon`, each with
+its own handler under `routes/events/`. The provider is a path segment, not a
+config lookup, and that is the whole point: **which provider signed a delivery
+decides how it must be verified, and the gateway reads only its own static
+manifest.** Putting the provider in the URL lets a static declaration describe
+a plugin whose provider is a runtime choice. It also means a delivery is always
+read by the adapter that understands its payload — a Comms envelope handed to
+the Photon normalizer parses as nothing at all.
 
-Read `gateway/src/http/routes/plugin-webhook.ts` in vellum-assistant before
-touching this. Every HTTP delivery to `/webhooks/plugins/<plugin>/<path>` is
-verified as:
+A delivery arriving for a provider that is not currently configured is a stale
+registration. It answers 200 and ignores the message: the delivery is authentic
+and retrying will not change the answer, while a 4xx would make the provider
+retry or disable a webhook whose only problem is that it is out of date.
 
-```
-Vellum-Signature: sha256=<hex HMAC-SHA256(rawBody, <plugin>/webhook_secret)>
-```
+### Verification is declared, not implemented here
 
-No secret stored → **409**. Missing or wrong signature → **403**. There is no
-exemption and no provider-native verification anywhere in the gateway — the
-platform email webhook verifies the same scheme against `vellum/webhook_secret`.
+Each route carries a `verification` descriptor saying how the gateway should
+check a delivery — algorithm, which credential field holds the secret, where
+the signature is, and exactly which bytes it covers. `docs/ingress-verification.md`
+is the spec, written to be implemented gateway-side.
 
-Comms and Photon sign with their own schemes (Photon uses
-`X-Spectrum-Signature`, HMAC-SHA256 with a per-webhook secret returned once at
-registration; both take only `{ url }` when registering, with nowhere to
-configure a header). **Neither can produce a `Vellum-Signature`.** So a
-registered webhook is necessary but not sufficient: deliveries land on the
-gateway and are refused before this plugin sees them.
+The two providers need different answers, which is why the descriptor is data:
 
-That is a gateway-side gap, and the fix belongs there — a signer or handshake
-variant for third-party callers, or provider-native verification selected by
-the ingress manifest, which already carries `signer` and `handshake` fields for
-exactly this kind of distinction. **Do not add plugin-side signature checking
-to work around it.** The plugin does not re-implement verification: two schemes
-would be two things to keep in sync and one to get subtly wrong, and the route
-handler only ever runs on deliveries the gateway already authenticated.
+- **Photon** signs `HMAC-SHA256(secret, "v0:" + timestamp + ":" + rawBody)` and
+  sends it as `X-Spectrum-Signature: v0=<hex>` with `X-Spectrum-Timestamp` and
+  a five-minute tolerance. The secret is issued **once**, from
+  `POST /projects/{id}/webhooks/`, and never appears in a listing — so
+  registration stores it immediately, and a registration whose secret was lost
+  is deleted and recreated rather than reused. A webhook nothing can verify is
+  worse than no webhook.
+- **Comms** documents no signature and issues no signing secret at all. So the
+  plugin mints a 256-bit token, stores it, and registers a URL carrying it;
+  the gateway compares it in constant time. Weaker than an HMAC, and the URL is
+  a bearer credential — but the alternatives are an unsigned public endpoint or
+  no webhook support for that vendor.
 
-Until that lands, **poll ingress is the one that works end to end.** Both
-providers support it. It runs in **its own worker process** (`src/worker/`),
-not the daemon: a busy line or a slow provider must not compete with the
-assistant's event loop, and a crash in the loop must not take the daemon down.
-The supervisor restarts it with backoff.
+Both secrets live in the credential store under `WEBHOOK_SECRET_FIELDS`
+(`src/config.ts`), never in `PROVIDER_CREDENTIALS` — nobody types them, and the
+settings app must not offer a field for a value the user cannot know.
+
+**`channels/ingress.json` is read by the gateway and by nothing in this
+plugin's type system.** Every fact stated in both places can drift silently,
+and the symptom is deliveries failing verification with both sides looking
+correct. `src/__tests__/ingress-manifest.test.ts` is the join: it holds the
+manifest against `PROVIDER_IDS`, `WEBHOOK_SECRET_FIELDS`,
+`WEBHOOK_VERIFICATION`, the route paths the plugin registers, and the handler
+files on disk.
+
+**Until the gateway implements the descriptor, deliveries are still refused** —
+it verifies `Vellum-Signature` against `<plugin>/webhook_secret` and neither
+vendor can produce that. The manifest is forward-compatible either way: the
+current route schema is a non-strict `z.object`, so an unknown `verification`
+key is dropped rather than rejected. **Poll ingress is the one that works end
+to end** in the meantime; both providers support it. It runs in **its own
+worker process** (`src/worker/`), not the daemon: a busy line or a slow
+provider must not compete with the assistant's event loop, and a crash in the
+loop must not take the daemon down. The supervisor restarts it with backoff.
+
+**The plugin does not verify signatures itself**, and the proposal exists so
+that stays true. Two implementations of one scheme is one of them being subtly
+wrong, and the route handler should only ever run on deliveries the gateway
+already authenticated.
 
 ## Credentials
 

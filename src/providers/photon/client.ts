@@ -190,6 +190,13 @@ export class PhotonClient {
     return PhotonWebhookSchema.safeParse(data).data;
   }
 
+  /** `DELETE /projects/{projectId}/webhooks/{webhookId}`. */
+  async deleteWebhook(id: string): Promise<void> {
+    await this.cloudRequest(`/webhooks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
   /** `POST /v1/messages:sendText`. */
   async sendText(input: SendTextInput): Promise<PhotonMessage | undefined> {
     const raw = await this.messageRequest("/v1/messages:sendText", {

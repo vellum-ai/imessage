@@ -204,11 +204,11 @@ describe("provider credentials", () => {
     expect(new Set(fields).size).toBe(fields.length);
   });
 
-  test("every field carries the label and hint the app renders", () => {
+  test("every field carries the label and placeholder the app renders", () => {
     for (const id of PROVIDER_IDS) {
       for (const spec of PROVIDER_CREDENTIALS[id]) {
         expect(spec.label.length).toBeGreaterThan(0);
-        expect(spec.hint.length).toBeGreaterThan(0);
+        expect(spec.placeholder.length).toBeGreaterThan(0);
       }
     }
   });

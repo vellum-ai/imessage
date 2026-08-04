@@ -11,8 +11,10 @@
  * running first.
  */
 
+import { readSecret, storeSecret } from "./app-credentials.ts";
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
+import { WEBHOOK_SECRET_FIELDS, WEBHOOK_VERIFICATION } from "./config.ts";
 import type { RuntimeContext } from "./plugin-state.ts";
 import {
   getInitContext,
@@ -64,29 +66,63 @@ async function registerWebhook(
   provider: MessagingProvider,
   logger: RuntimeContext["logger"],
 ): Promise<void> {
-  const endpoint = resolveWebhookEndpoint();
-  if (!endpoint.ok) {
-    logger.warn(
-      { provider: provider.id, reason: endpoint.reason },
-      "imessage: no webhook could be registered — inbound will not arrive until ingress.publicBaseUrl is set or ingressMode is 'poll'",
-    );
-    return;
-  }
+  const secretField = WEBHOOK_SECRET_FIELDS[provider.id];
 
   try {
-    const result = await provider.ensureWebhook(endpoint.url);
+    const held = await readSecret(secretField);
+
+    // A provider that cannot sign gets a token this plugin mints, carried in
+    // the registered URL. Minting before composing the URL is what makes the
+    // URL and the stored token one fact rather than two that have to agree.
+    let sharedSecret: string | undefined;
+    if (WEBHOOK_VERIFICATION[provider.id] === "shared-secret") {
+      sharedSecret = held ?? randomToken();
+      if (!held) await storeSecret(secretField, sharedSecret);
+    }
+
+    const endpoint = resolveWebhookEndpoint({
+      provider: provider.id,
+      sharedSecret,
+    });
+    if (!endpoint.ok) {
+      logger.warn(
+        { provider: provider.id, reason: endpoint.reason },
+        "imessage: no webhook could be registered — inbound will not arrive until ingress.publicBaseUrl is set or ingressMode is 'poll'",
+      );
+      return;
+    }
+
+    const result = await provider.ensureWebhook({
+      url: endpoint.url,
+      hasSecret: Boolean(held),
+    });
+
+    // Store before reporting success: a secret issued once and dropped leaves
+    // a registration whose deliveries nothing can verify.
+    if (result.secret) await storeSecret(secretField, result.secret);
+
     logger.info(
-      { provider: provider.id, url: endpoint.url, created: result.created },
+      { provider: provider.id, created: result.created },
       result.created
         ? "imessage: registered the inbound webhook with the provider"
         : "imessage: provider webhook already registered",
     );
   } catch (err) {
+    // Everything is inside the boundary, minting and storing included: this
+    // runs un-awaited, so anything escaping is an unhandled rejection rather
+    // than a channel that reports what went wrong.
     logger.warn(
-      { err, provider: provider.id, url: endpoint.url },
+      { err, provider: provider.id },
       "imessage: could not register the inbound webhook — the channel is running but will not hear anything",
     );
   }
+}
+
+/** A shared secret with enough entropy to be a credential on its own. */
+function randomToken(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 /**

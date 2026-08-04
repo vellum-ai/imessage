@@ -470,15 +470,16 @@ describe("webhook registration", () => {
     // Registering for message.sent would deliver our own replies back, and the
     // normalizer would drop every one of them.
     stubFetch(() => Response.json({ webhooks: [] }));
-    const result = await createCommsProvider().ensureWebhook(
-      "https://host.example/webhooks/plugins/imessage/events",
-    );
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/webhooks/plugins/imessage/events/comms?token=t",
+      hasSecret: true,
+    });
 
     expect(result.created).toBe(true);
     expect(calls.map((c) => c.init.method)).toEqual(["GET", "POST"]);
     expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
-      url: "https://host.example/webhooks/plugins/imessage/events",
-      events: ["message.received"],
+      url: "https://host.example/webhooks/plugins/imessage/events/comms?token=t",
+      events: ["comms.message.received"],
     });
   });
 
@@ -496,9 +497,10 @@ describe("webhook registration", () => {
         : Response.json({}),
     );
 
-    const result = await createCommsProvider().ensureWebhook(
-      "https://host.example/mine",
-    );
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: true,
+    });
 
     expect(result).toEqual({ created: false, id: "wh_2" });
     expect(calls).toHaveLength(1);
@@ -513,7 +515,10 @@ describe("webhook registration", () => {
     );
 
     expect(
-      await createCommsProvider().ensureWebhook("https://host.example/mine"),
+      await createCommsProvider().ensureWebhook({
+        url: "https://host.example/mine",
+        hasSecret: true,
+      }),
     ).toEqual({ created: false, id: "wh_9" });
   });
 
@@ -530,11 +535,12 @@ describe("webhook registration", () => {
         : undefined,
     );
 
-    const result = await createPhotonProvider().ensureWebhook(
-      "https://host.example/mine",
-    );
+    const result = await createPhotonProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
 
-    expect(result).toEqual({ created: true, id: "wh_p" });
+    expect(result).toEqual({ created: true, id: "wh_p", secret: undefined });
     expect(calls[0]?.path).toBe(
       `${PHOTON_CLOUD_BASE}/projects/test-key/webhooks/`,
     );
@@ -554,7 +560,10 @@ describe("webhook registration", () => {
     );
 
     expect(
-      await createPhotonProvider().ensureWebhook("https://host.example/mine"),
+      await createPhotonProvider().ensureWebhook({
+        url: "https://host.example/mine",
+        hasSecret: true,
+      }),
     ).toEqual({ created: false, id: "wh_p" });
     expect(calls).toHaveLength(1);
   });
@@ -568,7 +577,68 @@ describe("webhook registration", () => {
         : undefined,
     );
 
-    await createPhotonProvider().ensureWebhook("https://host.example/mine");
+    await createPhotonProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
     expect(calls.some((c) => c.path.includes("/imessage/tokens"))).toBe(false);
+  });
+});
+
+describe("photon webhook secrets", () => {
+  test("re-registers when the signing secret was lost", async () => {
+    // Photon issues the secret once, at creation, and its listing never
+    // carries it. A registration whose secret we no longer hold is worse than
+    // none: deliveries arrive and nothing can verify them.
+    stubPhoton((call) => {
+      if (!call.path.includes("/webhooks/")) return undefined;
+      if (call.init.method === "GET") {
+        return Response.json({
+          succeed: true,
+          data: [{ id: "wh_old", webhookUrl: "https://host.example/mine" }],
+        });
+      }
+      if (call.init.method === "DELETE") {
+        return Response.json({ succeed: true, data: {} });
+      }
+      return Response.json({
+        succeed: true,
+        data: {
+          id: "wh_new",
+          webhookUrl: "https://host.example/mine",
+          signingSecret: "s3cr3t",
+        },
+      });
+    });
+
+    const result = await createPhotonProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
+
+    expect(result).toEqual({ created: true, id: "wh_new", secret: "s3cr3t" });
+    expect(calls.map((c) => c.init.method)).toEqual(["GET", "DELETE", "POST"]);
+    expect(calls[1]?.path).toContain("/webhooks/wh_old");
+  });
+
+  test("hands the issued secret back for the caller to store", async () => {
+    stubPhoton((call) =>
+      call.path.includes("/webhooks/")
+        ? Response.json({
+            succeed: true,
+            data:
+              call.init.method === "GET"
+                ? []
+                : { id: "wh_p", signingSecret: "issued-once" },
+          })
+        : undefined,
+    );
+
+    const result = await createPhotonProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
+
+    expect(result.secret).toBe("issued-once");
   });
 });

@@ -30,8 +30,6 @@ import {
 } from "./config.ts";
 import { PROVIDER_IDS, type ProviderId } from "./providers/types.ts";
 
-const execFileAsync = promisify(execFile);
-
 /** How long the CLI gets before a hung call is the answer. */
 const CLI_TIMEOUT_MS = 10_000;
 
@@ -121,6 +119,40 @@ export async function storeCredentials(
 }
 
 /**
+ * Read a stored credential, or `undefined` when there is none.
+ *
+ * Unlike the user-facing fields, webhook secrets are read back by this plugin:
+ * a Comms token has to go into the URL it registers, and knowing whether a
+ * Photon secret is held decides whether a registration can be reused.
+ */
+export async function readSecret(field: string): Promise<string | undefined> {
+  try {
+    const value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Store a secret this plugin generated or was issued, rather than one a user
+ * typed.
+ *
+ * Deliberately not routed through {@link storeCredentials}: that validates
+ * against `PROVIDER_CREDENTIALS`, which is the settings app's field list, and
+ * a webhook secret must never appear there.
+ */
+export async function storeSecret(
+  field: string,
+  value: string,
+): Promise<void> {
+  if (value.trim().length === 0) {
+    throw new CredentialWriteError(`refusing to store an empty ${field}`);
+  }
+  await writeCredential(field, value.trim());
+}
+
+/**
  * One `assistant credentials set`.
  *
  * A failure is rewritten to name the field and quote the CLI's own stderr —
@@ -129,7 +161,11 @@ export async function storeCredentials(
  */
 async function writeCredential(field: string, value: string): Promise<void> {
   try {
-    await execFileAsync(
+    // Promisified per call rather than once at module load: binding it at load
+    // captures whatever `execFile` was then, which makes the behaviour depend
+    // on import order — and makes a test that swaps the module out silently
+    // exercise the real CLI.
+    await promisify(execFile)(
       "assistant",
       [
         "credentials",

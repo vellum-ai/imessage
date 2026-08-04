@@ -104,8 +104,22 @@ export const WebhookEventSchema = z.looseObject({
 });
 export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
 
-/** Event names that carry an inbound message from a human. */
-const INBOUND_EVENT_NAMES = new Set(["message.received"]);
+/**
+ * The event this channel subscribes to, as `POST /webhooks` names it.
+ *
+ * Documented at `docs.osis.co/messages-api/create-webhook` alongside
+ * `comms.message.sent`, which this channel deliberately does not subscribe to.
+ */
+export const COMMS_INBOUND_EVENT = "comms.message.received";
+
+/**
+ * Event names that carry an inbound message from a human.
+ *
+ * The registration name is documented; what the delivery envelope puts in its
+ * `event` field is not, so the unprefixed spelling is accepted too. Guessing
+ * wrong in the strict direction would drop every inbound message.
+ */
+const INBOUND_EVENT_NAMES = new Set([COMMS_INBOUND_EVENT, "message.received"]);
 
 /** Pull the message out of either envelope shape. */
 export function messageFromWebhookEvent(

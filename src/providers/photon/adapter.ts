@@ -16,6 +16,7 @@ import { PhotonClient } from "./client.ts";
 import { normalizePhotonMessage, normalizeWebhookEvent } from "./normalize.ts";
 import { createdAtOf } from "./schemas.ts";
 import type {
+  EnsureWebhookOptions,
   FetchInboundOptions,
   InboundRecord,
   MessagingProvider,
@@ -75,14 +76,35 @@ export function createPhotonProvider(): MessagingProvider {
       }));
     },
 
-    async ensureWebhook(url: string): Promise<WebhookRegistration> {
+    /**
+     * Register, or re-register when the signing secret is gone.
+     *
+     * Photon returns the secret exactly once, at creation, and its listing
+     * never carries it. So a registration that exists while this plugin holds
+     * no secret is worse than none: deliveries arrive and nothing can verify
+     * them. Deleting and recreating is the only way back to a verifiable
+     * webhook, and Photon's own docs say the same.
+     */
+    async ensureWebhook(
+      opts: EnsureWebhookOptions,
+    ): Promise<WebhookRegistration> {
       const existing = (await client.listWebhooks()).find(
-        (hook) => hook.webhookUrl === url,
+        (hook) => hook.webhookUrl === opts.url,
       );
-      if (existing) return { created: false, id: existing.id };
 
-      const created = await client.createWebhook(url);
-      return { created: true, id: created?.id };
+      if (existing && opts.hasSecret) {
+        return { created: false, id: existing.id };
+      }
+      if (existing?.id) {
+        await client.deleteWebhook(existing.id);
+      }
+
+      const created = await client.createWebhook(opts.url);
+      return {
+        created: true,
+        id: created?.id,
+        secret: created?.signingSecret,
+      };
     },
 
     /**

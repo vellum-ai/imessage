@@ -106,64 +106,6 @@ export type PhotonWebhook = z.infer<typeof PhotonWebhookSchema>;
 export const ListWebhooksResponseSchema = z.array(PhotonWebhookSchema);
 
 /* ------------------------------------------------------------------ *
- * Message plane
- * ------------------------------------------------------------------ */
-
-/** An address as the message plane reports it. */
-export const AddressSchema = z.looseObject({
-  address: softString,
-  country: softString,
-  /** `iMessage`, `SMS`, `RCS`, or a numeric protobuf enum. UNVERIFIED spelling. */
-  service: z.union([z.string(), z.number()]).optional().catch(undefined),
-});
-
-export const MessageContentSchema = z.looseObject({
-  text: softString,
-});
-
-/**
- * A message on the wire.
- *
- * Required: `guid` (dedup key) and `isFromMe` (an outbound echo must never be
- * replayed into the assistant as user input — and unlike a missing text body,
- * guessing this one wrong is what makes the assistant answer itself).
- */
-export const PhotonMessageSchema = z.looseObject({
-  guid: z.string().min(1),
-  isFromMe: z.boolean(),
-  content: MessageContentSchema.optional().catch(undefined),
-  chatGuids: z.array(z.string()).optional().catch(undefined),
-  sender: AddressSchema.optional().catch(undefined),
-  dateCreated: softString,
-  /** Set on tapbacks and edits; those are not turns. UNVERIFIED. */
-  reactionTargetGuid: softString,
-  isSystemMessage: z.boolean().optional().catch(undefined),
-  isServiceMessage: z.boolean().optional().catch(undefined),
-});
-export type PhotonMessage = z.infer<typeof PhotonMessageSchema>;
-
-/** `POST /v1/messages:sendText` and `POST /v1/chats` (its `initialMessage`). */
-export const SendTextResponseSchema = z.looseObject({
-  message: PhotonMessageSchema.optional().catch(undefined),
-});
-
-export const ChatSchema = z.looseObject({
-  guid: z.string().min(1),
-});
-
-export const CreateChatResponseSchema = z.looseObject({
-  chat: ChatSchema.optional().catch(undefined),
-  initialMessage: PhotonMessageSchema.optional().catch(undefined),
-});
-
-/** `GET /v1/messages:listRecent` */
-export const ListMessagesResponseSchema = z.looseObject({
-  messages: z.array(PhotonMessageSchema).catch([]),
-  nextPageToken: softString,
-});
-export type ListMessagesResponse = z.infer<typeof ListMessagesResponseSchema>;
-
-/* ------------------------------------------------------------------ *
  * Webhooks
  * ------------------------------------------------------------------ */
 
@@ -216,19 +158,4 @@ export function isInboundMessageEvent(event: WebhookEvent): boolean {
   if (event.event && !INBOUND_EVENT_NAMES.has(event.event)) return false;
   const direction = event.message?.direction;
   return direction === undefined || direction === "inbound";
-}
-
-/**
- * Which chat a message belongs to.
- *
- * A message can be in several chats on iMessage; the first is the one it was
- * delivered to. Falls back to the space id from the webhook envelope.
- */
-export function chatGuidOf(message: PhotonMessage): string | undefined {
-  return message.chatGuids?.[0];
-}
-
-/** Provider-side creation time, used only to advance the poll cursor. */
-export function createdAtOf(message: PhotonMessage): string | undefined {
-  return message.dateCreated;
 }

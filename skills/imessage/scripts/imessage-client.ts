@@ -24,6 +24,7 @@ import {
 } from "../../../src/channel/render.ts";
 import { pluginConfigPath } from "../../../src/plugin-paths.ts";
 import { resolveProvider } from "../../../src/providers/index.ts";
+import type { ResolveProviderOptions } from "../../../src/providers/index.ts";
 
 export interface SentChunk {
   id: string;
@@ -62,9 +63,18 @@ export function normalizeRecipient(raw: string): string {
  * the earlier chunks, and pushing more after a failure delivers the reply out
  * of order.
  */
-export async function sendMessage(opts: SendOptions): Promise<SentChunk[]> {
+export async function sendMessage(
+  opts: SendOptions,
+  /**
+   * Test seam, never passed by the CLI. Photon's message plane opens a gRPC
+   * channel on construction, so a test of this function would otherwise dial
+   * the network.
+   */
+  deps: Pick<ResolveProviderOptions, "photonMessageClient"> = {},
+): Promise<SentChunk[]> {
   const provider = resolveProvider({
     config: readConfigView(pluginConfigPath()),
+    ...deps,
   });
 
   const to = normalizeRecipient(opts.to);

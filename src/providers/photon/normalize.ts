@@ -11,13 +11,9 @@
  * that decision is getting `actorExternalId` right and stamping the chat type.
  */
 
-import type { PhotonMessage, WebhookEvent, WebhookMessage } from "./schemas.ts";
-import {
-  chatGuidOf,
-  isInboundMessageEvent,
-  PhotonMessageSchema,
-  WebhookEventSchema,
-} from "./schemas.ts";
+import type { WebhookEvent, WebhookMessage } from "./schemas.ts";
+import { isInboundMessageEvent, WebhookEventSchema } from "./schemas.ts";
+import type { PhotonMessage } from "./message-client.ts";
 import { CHANNEL_ID } from "../../plugin-paths.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveIdentity } from "../../channel/identity.ts";
@@ -38,6 +34,11 @@ export function chatTypeFor(platform: string | undefined): "imessage" | "sms" {
 /**
  * Normalize one message read off the message plane (the poll path).
  *
+ * Typed rather than parsed: this comes back from the SDK, which has already
+ * decoded protobuf into a `Message`. Validating it again with zod would be
+ * checking the vendor's own decoder against a hand-written copy of its schema,
+ * and the copy is the thing that goes stale.
+ *
  * Returns `undefined` when the message must not become a turn:
  *   - it is ours (`isFromMe`), or the assistant answers itself
  *   - it is a tapback, a system message, or a service message
@@ -45,20 +46,16 @@ export function chatTypeFor(platform: string | undefined): "imessage" | "sms" {
  *   - it has no text, which is a receipt or an attachment-only message
  */
 export function normalizePhotonMessage(
-  raw: unknown,
+  message: PhotonMessage,
   receivedAt: string,
 ): PluginInboundEvent | undefined {
-  const parsed = PhotonMessageSchema.safeParse(raw);
-  if (!parsed.success) return undefined;
-  const message = parsed.data;
-
   if (message.isFromMe) return undefined;
   if (message.reactionTargetGuid) return undefined;
   if (message.isSystemMessage || message.isServiceMessage) return undefined;
 
   const identity = resolveIdentity({
     from: message.sender?.address,
-    conversationId: chatGuidOf(message),
+    conversationId: message.chatGuids[0],
   });
   if (!identity) return undefined;
 
@@ -78,9 +75,9 @@ export function normalizePhotonMessage(
     source: {
       updateId: message.guid,
       messageId: message.guid,
-      chatType: chatTypeFor(serviceNameOf(message)),
+      chatType: chatTypeFor(message.sender?.service),
     },
-    raw: (raw ?? {}) as Record<string, unknown>,
+    raw: message as unknown as Record<string, unknown>,
   };
 }
 
@@ -132,17 +129,4 @@ export function normalizeWebhookEvent(
     },
     raw: (raw ?? {}) as Record<string, unknown>,
   };
-}
-
-/**
- * The service name off a message-plane payload.
- *
- * Protobuf-JSON may render the enum as its name or its ordinal, so both are
- * accepted; `1` is `CHAT_SERVICE_TYPE_IMESSAGE`.
- */
-function serviceNameOf(message: PhotonMessage): string | undefined {
-  const service = message.sender?.service;
-  if (typeof service === "string") return service;
-  if (service === 1) return "imessage";
-  return undefined;
 }

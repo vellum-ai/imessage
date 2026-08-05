@@ -134,4 +134,14 @@ export interface MessagingProvider {
     raw: unknown,
     receivedAt: string,
   ): PluginInboundEvent | undefined;
+
+  /**
+   * Release whatever the provider is holding open.
+   *
+   * Optional because most providers hold nothing: a `fetch`-based client has
+   * no connection of its own to give back. Photon does — its message plane is
+   * a long-lived gRPC channel with its own keepalive — and a provider is
+   * rebuilt on every settings save, so without this each save would leak one.
+   */
+  close?(): Promise<void>;
 }

@@ -23,7 +23,6 @@ export const WorkerBootstrapSchema = z.object({
   storageDir: z.string().min(1),
   intervalMs: z.number().int().positive(),
   provider: z.enum(PROVIDER_IDS),
-  allowedHandles: z.array(z.string()).default([]),
 });
 export type WorkerBootstrap = z.infer<typeof WorkerBootstrapSchema>;
 

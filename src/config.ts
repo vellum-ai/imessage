@@ -140,17 +140,6 @@ export const IMessageConfigSchema = z.object({
     .max(MAX_POLL_INTERVAL_MS)
     .default(5_000)
     .describe("Delay between polls, in milliseconds. Only used in poll mode."),
-  /**
-   * Handles allowed to reach the assistant. Empty means no plugin-side filter
-   * — the gateway's admission floor is the real gate, this is a coarse
-   * pre-filter for a line that is also used for something else.
-   */
-  allowedHandles: z
-    .array(z.string())
-    .default([])
-    .describe(
-      "E.164 handles allowed to reach the assistant. Empty allows all; the admission floor still applies.",
-    ),
 });
 
 export type IMessageConfig = z.infer<typeof IMessageConfigSchema>;
@@ -212,18 +201,4 @@ export async function resolveCredentialField(
 /** Read the Comms API key. */
 export async function resolveApiKey(): Promise<string> {
   return resolveCredentialField(API_KEY_FIELD, "The Comms API key");
-}
-
-/**
- * Whether a handle passes the plugin-side allowlist.
- *
- * An empty allowlist admits everything. This is a pre-filter, not a security
- * boundary — the gateway's admission floor is.
- */
-export function isAllowedHandle(
-  config: IMessageConfig,
-  handle: string,
-): boolean {
-  if (config.allowedHandles.length === 0) return true;
-  return config.allowedHandles.includes(handle);
 }

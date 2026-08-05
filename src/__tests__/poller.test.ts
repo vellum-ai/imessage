@@ -92,7 +92,6 @@ function stubProvider(
 function makePoller(
   provider: MessagingProvider,
   sink: (e: PluginInboundEvent) => void,
-  extra: { isAllowed?: (handle: string) => boolean } = {},
 ) {
   return new Poller({
     provider,
@@ -101,7 +100,6 @@ function makePoller(
     logger: SILENT_LOGGER,
     sink,
     now: () => new Date("2026-07-28T12:00:30.000Z"),
-    ...extra,
   });
 }
 
@@ -181,7 +179,10 @@ describe("Poller", () => {
     expect(calls[1]?.since).toBe("2026-07-28T12:00:00.000Z");
   });
 
-  test("applies the handle allowlist", async () => {
+  test("delivers every sender, filtering none", async () => {
+    // Same rule as the webhook route: the plugin does not decide who may
+    // reach the assistant, so a second sender from the same batch is not the
+    // poller's business to drop.
     const ts = "2026-07-28T12:00:00.000Z";
     const { provider } = stubProvider([
       [
@@ -190,12 +191,13 @@ describe("Poller", () => {
       ],
     ]);
     const events: PluginInboundEvent[] = [];
-    const poller = makePoller(provider, (e) => events.push(e), {
-      isAllowed: (handle) => handle === "+15551234567",
-    });
+    const poller = makePoller(provider, (e) => events.push(e));
 
-    expect(await poller.pollOnce()).toBe(1);
-    expect(events[0]?.actor.actorExternalId).toBe("+15551234567");
+    expect(await poller.pollOnce()).toBe(2);
+    expect(events.map((e) => e.actor.actorExternalId)).toEqual([
+      "+15551234567",
+      "+15559990000",
+    ]);
   });
 
   test("start() with no stored cursor polls from now, not from history", async () => {

@@ -127,10 +127,10 @@ Optional, in the plugin's `config.json`:
 | `provider` | `"photon"` | `"photon"` or `"comms"`. Set it from the settings app, which restarts ingress; editing it here needs a reload. |
 | `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. Set it from the settings app, which restarts ingress. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only, and not surfaced in the settings app. |
-| `allowedHandles` | `[]` | E.164 handles allowed through. Empty allows all. |
 
-`allowedHandles` is a coarse pre-filter, not a security control — the
-assistant's admission policy is the real gate and applies either way.
+There is no per-handle allowlist here. Who may reach the assistant is decided
+by its admission policy and contact ACL, which apply to this channel the same
+way they apply to every other one.
 
 ## Troubleshooting
 

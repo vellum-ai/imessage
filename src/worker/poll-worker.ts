@@ -12,7 +12,7 @@
 
 import { Poller } from "../poller.ts";
 import { resolveProvider } from "../providers/index.ts";
-import { IMessageConfigSchema, isAllowedHandle } from "../config.ts";
+import { IMessageConfigSchema } from "../config.ts";
 import type { WorkerBootstrap, WorkerMessage } from "./protocol.ts";
 import { encodeWorkerMessage, WorkerBootstrapSchema } from "./protocol.ts";
 
@@ -37,13 +37,12 @@ const workerLogger = {
 };
 
 export async function runWorker(bootstrap: WorkerBootstrap): Promise<Poller> {
-  // Reconstruct the full config from the bootstrap subset so the allowlist
-  // helper and the provider registry see the same shape they do in-process.
+  // Reconstruct the full config from the bootstrap subset so the provider
+  // registry sees the same shape it does in-process.
   const config = IMessageConfigSchema.parse({
     provider: bootstrap.provider,
     ingressMode: "poll",
     pollIntervalMs: bootstrap.intervalMs,
-    allowedHandles: bootstrap.allowedHandles,
   });
 
   const provider = resolveProvider({ config });
@@ -61,7 +60,6 @@ export async function runWorker(bootstrap: WorkerBootstrap): Promise<Poller> {
     storageDir: bootstrap.storageDir,
     intervalMs: bootstrap.intervalMs,
     logger: workerLogger,
-    isAllowed: (handle) => isAllowedHandle(config, handle),
     sink: (event) => emit({ type: "event", event }),
   });
 

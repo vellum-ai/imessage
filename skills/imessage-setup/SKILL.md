@@ -128,10 +128,6 @@ Optional, in the plugin's `config.json`:
 | `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. Set it from the settings app, which restarts ingress. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only, and not surfaced in the settings app. |
 
-There is no per-handle allowlist here. Who may reach the assistant is decided
-by its admission policy and contact ACL, which apply to this channel the same
-way they apply to every other one.
-
 ## Troubleshooting
 
 **"The Photon project ID is not set"** (or the Comms equivalent) — step 2 was

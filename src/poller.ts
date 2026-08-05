@@ -39,14 +39,7 @@ export interface PollerOptions {
   storageDir: string;
   intervalMs: number;
   logger: PollerLogger;
-  /**
-   * Where normalized events go.
-   *
-   * Everything the line receives, unfiltered. Deciding who may reach the
-   * assistant belongs to the host's inbound pipeline, which classifies the
-   * actor against the gateway's own contact ACL — see the note in
-   * `webhook-route.ts`.
-   */
+  /** Where normalized events go. */
   sink: (event: PluginInboundEvent) => Promise<void> | void;
   /** Injectable for tests. */
   now?: () => Date;

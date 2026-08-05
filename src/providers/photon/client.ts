@@ -5,54 +5,66 @@
  * about this provider:
  *
  * - **Control plane** — `https://spectrum.photon.codes`, `Authorization: Basic
- *   base64(projectId:projectSecret)`. Projects, lines, webhooks, and the token
- *   mint. It cannot send a message.
- * - **Message plane** — `https://imessage.spectrum.photon.codes`,
- *   `Authorization: Bearer <token>` where the token is minted from the control
- *   plane and expires. Sends, chat creation, and message listing.
+ *   base64(projectId:projectSecret)`. REST, with a `{ succeed, data }`
+ *   envelope. Projects, lines, webhooks, and the token mint. It cannot send a
+ *   message. This file speaks it directly, with `fetch`.
+ * - **Message plane** — gRPC behind Envoy, bearer-authenticated with a token
+ *   minted from the control plane. Sends, chat resolution, message listing.
+ *   It does not serve REST in any form, so the vendor's SDK owns that half;
+ *   see `message-client.ts`.
  *
  * So every message-plane call is really two: mint a token if the cached one is
  * gone or stale, then make the call. The mint is cached until shortly before
- * its own `expiresIn` so a busy line does not mint per message, and a 401 on
- * the message plane drops the cache and retries once — a token that expired
- * mid-flight is an expected event, not an error worth surfacing.
- *
- * Photon also ships an official SDK that speaks gRPC (and a generated HTTP
- * client over the same service). This talks to the documented HTTP routes with
- * `fetch` instead, matching `CommsClient` and keeping the plugin's dependency
- * list at zod. The paths and payload names below come from that SDK's own
- * request mapping.
+ * its own `expiresIn` so a busy line does not mint per message, and the SDK
+ * resolves the token per RPC, so a rotation costs a mint rather than a
+ * reconnect.
  */
 
-import { describeApiFailure } from "../error-detail.ts";
 import {
-  ChatSchema,
-  CreateChatResponseSchema,
   EnvelopeSchema,
   IMessageInfoSchema,
-  ListMessagesResponseSchema,
   ListWebhooksResponseSchema,
-  PhotonMessageSchema,
   PhotonWebhookSchema,
   ProjectSchema,
-  SendTextResponseSchema,
   TokenResponseSchema,
 } from "./schemas.ts";
 import type {
   IMessageInfo,
-  ListMessagesResponse,
-  PhotonMessage,
   PhotonProject,
   PhotonWebhook,
   TokenResponse,
 } from "./schemas.ts";
 import { resolveCredentialField } from "../../config.ts";
+import { describeApiFailure } from "../error-detail.ts";
+import type {
+  CreateChatInput,
+  ListRecentInput,
+  MessageClient,
+  MessageClientFactory,
+  MessageListPage,
+  PhotonMessage,
+  SendTextInput,
+} from "./message-client.ts";
+import { createMessageClient } from "./message-client.ts";
 
-/** Spectrum Cloud control plane. */
+/** Spectrum Cloud control plane. Plain REST, and the half this file speaks. */
 export const PHOTON_CLOUD_BASE = "https://spectrum.photon.codes";
 
-/** iMessage message plane. The SDK's own default middleware address. */
-export const PHOTON_IMESSAGE_BASE = "https://imessage.spectrum.photon.codes";
+/**
+ * iMessage message plane, as a gRPC address.
+ *
+ * This host does not serve REST. It is Envoy in front of the iMessage service,
+ * and it answers 415 with an empty body to anything that is not gRPC —
+ * including a bodiless `GET /`, which is how the plugin's earlier REST client
+ * failed: every send returned `415` and no explanation, because there was no
+ * response body to explain anything.
+ *
+ * The paths that client used (`POST /v1/chats`, `POST /v1/messages:sendText`)
+ * are real, but they belong to `imessage-server-v2-http`, a middleware Photon
+ * publishes as software rather than hosting. Reaching the hosted plane means
+ * speaking gRPC, so the SDK owns this half.
+ */
+export const PHOTON_IMESSAGE_ADDRESS = "imessage.spectrum.photon.codes:443";
 
 export const PROJECT_ID_FIELD = "photon_project_id";
 export const PROJECT_SECRET_FIELD = "photon_project_secret";
@@ -72,9 +84,6 @@ const TOKEN_REFRESH_MARGIN_MS = 30_000;
 
 /** Fallback lifetime when the mint does not say. Deliberately short. */
 const DEFAULT_TOKEN_TTL_MS = 5 * 60_000;
-
-/** The message plane rejects a page size outside this range. */
-const MAX_PAGE_SIZE = 100;
 
 export class PhotonApiError extends Error {
   constructor(
@@ -99,38 +108,23 @@ interface CachedToken {
   expiresAt: number;
 }
 
-export interface SendTextInput {
-  chatGuid: string;
-  text: string;
-  /** Stable key so a retried send does not double-deliver. */
-  clientMessageId: string;
-}
-
-export interface CreateChatInput {
-  addresses: string[];
-  clientMessageId: string;
-  /** Sent in the same round trip as the chat creation when present. */
-  text?: string;
-}
-
-export interface ListRecentInput {
-  /** RFC 3339 lower bound. Photon returns messages created after it. */
-  after?: string;
-  limit: number;
-  /** `false` asks for incoming only, which is all this plugin wants. */
-  isFromMe?: boolean;
-}
-
 export class PhotonClient {
   /**
    * Hosts and credential fields are fixed, not injected — same reasoning as
    * `CommsClient`. There is one Photon deployment and one pair of credentials
    * this client can use, so passing either in would only create a way for a
    * caller to be wrong. Tests stub `fetch` and mock `resolveCredential`.
+   *
+   * The message-client factory is the exception: it opens a real gRPC channel,
+   * so a test would otherwise have to dial the network to exercise a send.
    */
   private readonly cloudBase = PHOTON_CLOUD_BASE;
-  private readonly messageBase = PHOTON_IMESSAGE_BASE;
   private cachedToken?: CachedToken;
+  private messages?: MessageClient;
+
+  constructor(
+    private readonly makeMessageClient: MessageClientFactory = createMessageClient,
+  ) {}
 
   /** `GET /projects/{projectId}/` — the cheapest proof the credentials work. */
   async getProject(): Promise<PhotonProject> {
@@ -198,22 +192,28 @@ export class PhotonClient {
     });
   }
 
-  /** `POST /v1/messages:sendText`. */
-  async sendText(input: SendTextInput): Promise<PhotonMessage | undefined> {
-    const raw = await this.messageRequest("/v1/messages:sendText", {
-      method: "POST",
-      body: JSON.stringify({
-        chatGuid: input.chatGuid,
-        text: input.text,
-        clientMessageId: input.clientMessageId,
-      }),
-      idempotencyKey: input.clientMessageId,
+  /**
+   * The message plane, opened on first use and reused after that.
+   *
+   * Lazy because most of what this client does is control plane: reading a
+   * project, listing webhooks, minting a token. Opening a gRPC channel for a
+   * readiness check nobody follows with a send would be a connection held for
+   * nothing.
+   */
+  private plane(): MessageClient {
+    this.messages ??= this.makeMessageClient({
+      token: async () => (await this.token()).token,
     });
-    return SendTextResponseSchema.safeParse(raw).data?.message;
+    return this.messages;
+  }
+
+  /** Send to a chat that already exists. */
+  async sendText(input: SendTextInput): Promise<PhotonMessage | undefined> {
+    return this.plane().sendText(input);
   }
 
   /**
-   * `POST /v1/chats` — resolve a chat for one or more addresses.
+   * Resolve a chat for one or more addresses.
    *
    * iMessage keys a chat by its participants, so this returns the existing
    * chat for an address rather than piling up duplicates. Passing `text` sends
@@ -223,44 +223,29 @@ export class PhotonClient {
   async createChat(
     input: CreateChatInput,
   ): Promise<{ chatGuid?: string; message?: PhotonMessage }> {
-    const raw = await this.messageRequest("/v1/chats", {
-      method: "POST",
-      body: JSON.stringify({
-        addresses: input.addresses,
-        // CHAT_SERVICE_TYPE_IMESSAGE. Protobuf-JSON takes the ordinal, which
-        // is what the vendor SDK sends.
-        service: 1,
-        clientMessageId: input.clientMessageId,
-        ...(input.text === undefined
-          ? {}
-          : { initialMessage: { text: input.text } }),
-      }),
-      idempotencyKey: input.clientMessageId,
-    });
-
-    const parsed = CreateChatResponseSchema.safeParse(raw);
+    const created = await this.plane().createChat(input);
     return {
-      chatGuid: ChatSchema.safeParse(parsed.data?.chat).data?.guid,
-      message: PhotonMessageSchema.safeParse(parsed.data?.initialMessage).data,
+      chatGuid: created.chat?.guid,
+      ...(created.initialMessage ? { message: created.initialMessage } : {}),
     };
   }
 
-  /** `GET /v1/messages:listRecent`. */
-  async listRecent(input: ListRecentInput): Promise<ListMessagesResponse> {
-    const params = new URLSearchParams();
-    params.set("pageSize", String(Math.min(input.limit, MAX_PAGE_SIZE)));
-    if (input.after) params.set("after", input.after);
-    if (input.isFromMe !== undefined) {
-      params.set("isFromMe", String(input.isFromMe));
-    }
+  /** Recent messages on the line, newest-first, bounded by `after`. */
+  async listRecent(input: ListRecentInput): Promise<MessageListPage> {
+    return this.plane().listRecent(input);
+  }
 
-    const raw = await this.messageRequest(
-      `/v1/messages:listRecent?${params.toString()}`,
-      { method: "GET" },
-    );
-
-    const parsed = ListMessagesResponseSchema.safeParse(raw);
-    return parsed.success ? parsed.data : { messages: [] };
+  /**
+   * Release the message-plane channel.
+   *
+   * A gRPC channel is a live connection with its own keepalive timer, so a
+   * provider that is torn down and rebuilt — which every settings save does —
+   * would otherwise leak one per save.
+   */
+  async close(): Promise<void> {
+    const plane = this.messages;
+    this.messages = undefined;
+    await plane?.close();
   }
 
   /** Drop the cached token. Used by tests and after a 401. */
@@ -310,50 +295,6 @@ export class PhotonClient {
       );
     }
     return envelope.data.data;
-  }
-
-  /**
-   * One message-plane request, with a token minted as needed.
-   *
-   * A 401 drops the cached token and retries once: a token expiring mid-flight
-   * is routine, and making the caller handle it would push token lifetime up
-   * through the provider seam where it does not belong.
-   */
-  private async messageRequest(
-    path: string,
-    init: { method: string; body?: string; idempotencyKey?: string },
-  ): Promise<unknown> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const token = await this.token();
-      try {
-        return await this.withRetries(
-          `${this.messageBase}${path}`,
-          () => ({
-            method: init.method,
-            headers: {
-              Authorization: `Bearer ${token.token}`,
-              ...(token.instanceId
-                ? { "x-photon-server": token.instanceId }
-                : {}),
-              ...(init.idempotencyKey
-                ? { "x-idempotency-key": init.idempotencyKey }
-                : {}),
-              ...(init.body ? { "Content-Type": "application/json" } : {}),
-            },
-            ...(init.body ? { body: init.body } : {}),
-          }),
-          `Photon ${init.method} ${path}`,
-        );
-      } catch (err) {
-        const expired =
-          err instanceof PhotonApiError && err.status === 401 && attempt === 0;
-        if (!expired) throw err;
-        this.forgetToken();
-      }
-    }
-
-    // Unreachable: the loop either returns or throws.
-    throw new PhotonApiError(`Photon ${init.method} ${path} failed`, 0);
   }
 
   /** The cached message-plane token, minting a new one when it is due. */

@@ -26,14 +26,16 @@ economics are unresolved. Do not write user-facing copy that offers one.
 The channel is provider-agnostic above `src/providers/types.ts`. Two providers,
 both bring-your-own:
 
-- **`photon`** (default) — the user's own Photon (Spectrum) project. Two hosts rather
-  than one: a **control plane** at `spectrum.photon.codes` authenticated with
-  `Basic base64(projectId:projectSecret)`, and a **message plane** at
-  `imessage.spectrum.photon.codes` authenticated with a short-lived token
-  minted from it. Every send is therefore mint-then-call; the token is cached
-  until shortly before it expires, and a 401 drops it and retries once. All of
-  that lives in `src/providers/photon/client.ts` and nothing above the seam
-  knows there are two hosts.
+- **`photon`** (default) — the user's own Photon (Spectrum) project. Two hosts
+  and **two protocols**: a **control plane** at `spectrum.photon.codes`, plain
+  REST with `Basic base64(projectId:projectSecret)`, and a **message plane** at
+  `imessage.spectrum.photon.codes`, **gRPC only**, bearer-authenticated with a
+  short-lived token minted from the control plane. Every send is therefore
+  mint-then-call; the token is cached until shortly before it expires, and the
+  SDK resolves it per RPC so a rotation costs a mint rather than a reconnect.
+  `src/providers/photon/client.ts` speaks the control plane directly;
+  `message-client.ts` is the only file that imports the vendor SDK. Nothing
+  above the seam knows there are two hosts.
 - **`comms`** — the user's own Comms by Osis workspace, API key, and line. One
   REST API, one credential, both directions.
 
@@ -42,9 +44,23 @@ phone number. A reply already has one — the webhook's `space.id` is exactly
 that guid — so only a cold send to a bare handle resolves a chat first, and
 that resolution carries the message with it rather than paying two round trips.
 
-Photon ships an official SDK that speaks gRPC. The adapter talks to the same
-service's documented HTTP routes with `fetch` instead, which is what keeps this
-plugin's dependency list at zod.
+**The message plane does not serve REST, and there is no hosted HTTP option.**
+That host is Envoy in front of a gRPC service: it answers 415 with an empty
+body to anything that is not gRPC, including a bodiless `GET /`. An earlier
+version of this adapter spoke HTTP to it and every send failed with a bare
+`415` and no explanation, because there was no response body to explain
+anything.
+
+The REST routes are real — `POST /v1/chats`, `POST /v1/messages:sendText` —
+but they belong to `imessage-server-v2-http`, which Photon publishes as
+software you deploy rather than as a service it hosts. Its own SDK examples
+address it as `localhost:8080` or an env var. Reaching Photon's hosted plane
+means gRPC, which is why `@photon-ai/advanced-imessage` is a dependency.
+
+Keep it confined to `message-client.ts`. It pulls in `@grpc/grpc-js` and a
+protobuf runtime, and one import site is what keeps the rest of the plugin
+loadable — and testable — without any of that. That module also takes a
+factory, so no test opens a real channel.
 
 The seam is also worth keeping independently of the entry count. No official
 iMessage API exists; every vendor that sells lines runs a macOS fleet under an
@@ -280,21 +296,23 @@ arrive inside a 200**, so the envelope is checked, not just the status.
 - `GET /projects/{projectId}/imessage/` — `{ type: "shared" | "dedicated" }`.
 - `POST /projects/{projectId}/imessage/tokens` — mints message-plane tokens.
   Shared returns `{ token, expiresIn }`; dedicated returns `{ auth: {instanceId:
-  token}, numbers: {instanceId: phone}, expiresIn }`, and the instance id then
-  rides every message-plane call as `x-photon-server`.
+  token}, numbers: {instanceId: phone}, expiresIn }`.
 - `POST /projects/{projectId}/webhooks/` — `{ webhookUrl }`. The `signingSecret`
   comes back **once** and is never retrievable; a lost one means delete and
   re-register.
 
-Message plane `https://imessage.spectrum.photon.codes`, `Authorization: Bearer
-<minted token>`, `x-idempotency-key` on mutations.
+Message plane `imessage.spectrum.photon.codes:443`, **gRPC**, bearer metadata
+carrying the minted token. Reached through the SDK, not by hand:
 
-- `POST /v1/messages:sendText` — `{ chatGuid, text, clientMessageId }`.
-- `POST /v1/chats` — `{ addresses, service: 1, clientMessageId, initialMessage? }`
-  where `service: 1` is `CHAT_SERVICE_TYPE_IMESSAGE`. Creates or resolves the
-  chat for those participants.
-- `GET /v1/messages:listRecent` — `pageSize` (1–100), `after`, `before`,
-  `isFromMe`, `pageToken`.
+- `messages.sendText(chatGuid, text, { clientMessageId })`
+- `chats.create(addresses, { clientMessageId, message? })` — creates or
+  resolves the chat for those participants.
+- `messages.listRecent({ pageSize (1–100), after, before, isFromMe, pageToken })`
+
+Dedicated projects mint one token per instance. The HTTP middleware routes
+those with `x-photon-server`; the gRPC client has no such option, so the
+per-instance token is what identifies the instance. Untested against a real
+dedicated project.
 
 There is **no message send or list endpoint on the control plane**. Anything
 that looks like one there is project management; sending lives on the message

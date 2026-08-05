@@ -16,6 +16,10 @@
     "@vellumai/plugin-api": "^0.10.3"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@photon-ai/advanced-imessage": "^2.0.2",
+    "nice-grpc": "^2.1.17",
+    "nice-grpc-common": "^2.0.4",
     "zod": "4.3.6"
   },
   "devDependencies": {

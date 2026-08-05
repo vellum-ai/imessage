@@ -38,7 +38,7 @@ Either works. Ask which account they already have before creating one.
 | | Photon (default) | Comms by Osis |
 | --- | --- | --- |
 | Credentials | Project ID + project secret | One API key |
-| Sending | Mints a short-lived token, then sends | One REST call |
+| Sending | Mints a short-lived token, then sends over gRPC | One REST call |
 | Ingress | Webhook or poll | Webhook or poll |
 
 Everything below covers Photon. For Comms, the shape is the same and only the

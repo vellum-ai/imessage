@@ -15,10 +15,17 @@
 
 import type { ShutdownContext } from "@vellumai/plugin-api";
 
-import { getSupervisor, resetPluginState } from "../src/plugin-state.ts";
+import { getProvider, getSupervisor, resetPluginState } from "../src/plugin-state.ts";
 
 const shutdown = async (_ctx: ShutdownContext): Promise<void> => {
   getSupervisor()?.stop();
+  // Awaited, unlike the provider swap during a settings save: on a reload this
+  // hook runs before the next version's `init`, and Photon's message plane is
+  // a real gRPC connection. Leaving it to be collected would hand the new
+  // instance a second channel against the same line.
+  await getProvider()
+    ?.close?.()
+    .catch(() => {});
   resetPluginState();
 };
 

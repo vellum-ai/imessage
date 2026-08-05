@@ -26,9 +26,18 @@ mock.module("@vellumai/plugin-api", () => ({
 const { createCommsProvider } = await import("../providers/comms/adapter.ts");
 const { COMMS_API_BASE } = await import("../providers/comms/client.ts");
 const { createPhotonProvider } = await import("../providers/photon/adapter.ts");
-const { PHOTON_CLOUD_BASE, PHOTON_IMESSAGE_BASE } = await import(
-  "../providers/photon/client.ts"
-);
+const { PHOTON_CLOUD_BASE } = await import("../providers/photon/client.ts");
+type PhotonMessageClient = typeof import("../providers/photon/message-client.ts");
+type MessageClientFactory = PhotonMessageClient["createMessageClient"];
+type PhotonMessage = Awaited<
+  ReturnType<ReturnType<MessageClientFactory>["sendText"]>
+>;
+type PhotonChatResult = Awaited<
+  ReturnType<ReturnType<MessageClientFactory>["createChat"]>
+>;
+type MessageListPage = Awaited<
+  ReturnType<ReturnType<MessageClientFactory>["listRecent"]>
+>;
 const { PROVIDER_IDS } = await import("../providers/types.ts");
 const { resolveProvider } = await import("../providers/index.ts");
 const { IMessageConfigSchema } = await import("../config.ts");
@@ -225,16 +234,73 @@ function stubPhoton(handler: (call: FetchCall) => Response | undefined): void {
   });
 }
 
-function photonMessage(overrides: Record<string, unknown> = {}) {
+/**
+ * A message as the SDK hands it back: decoded, with `dateCreated` a `Date`.
+ *
+ * Cast rather than fully populated — the SDK's `Message` carries about forty
+ * fields and the adapter reads six of them. Spelling out the rest would be a
+ * second copy of the vendor's type that could only ever drift from it.
+ */
+function photonMessage(
+  overrides: Record<string, unknown> = {},
+): PhotonMessage {
   return {
     guid: "p2p-A1",
     isFromMe: false,
-    dateCreated: "2026-07-28T12:00:00.000Z",
+    dateCreated: new Date("2026-07-28T12:00:00.000Z"),
     chatGuids: ["any;-;+15551234567"],
     sender: { address: "+15551234567", service: "iMessage" },
     content: { text: "hello" },
     ...overrides,
+  } as unknown as PhotonMessage;
+}
+
+/** What the fake message plane was asked to do. */
+interface PlaneCall {
+  kind: "sendText" | "createChat" | "listRecent";
+  input: Record<string, unknown>;
+}
+
+/**
+ * A stand-in for the gRPC message plane.
+ *
+ * The real one opens a connection on construction, so every send test would
+ * otherwise dial the network. `PhotonClient` takes the factory for exactly
+ * this reason — see `message-client.ts`.
+ */
+function fakePlane(
+  handler: (call: PlaneCall) => unknown = () => undefined,
+): { factory: MessageClientFactory; calls: PlaneCall[]; closed: () => number } {
+  const planeCalls: PlaneCall[] = [];
+  let closes = 0;
+
+  const record = (kind: PlaneCall["kind"], input: unknown): unknown => {
+    const call = { kind, input: input as Record<string, unknown> };
+    planeCalls.push(call);
+    return handler(call);
   };
+
+  const factory: MessageClientFactory = (opts) => ({
+    async sendText(input) {
+      // Resolving the token is what the real client does per RPC, and the
+      // token-caching tests count the mints it triggers.
+      await opts.token();
+      return (record("sendText", input) as PhotonMessage) ?? photonMessage();
+    },
+    async createChat(input) {
+      await opts.token();
+      return (record("createChat", input) as PhotonChatResult) ?? { chat: {} as never };
+    },
+    async listRecent(input) {
+      await opts.token();
+      return (record("listRecent", input) as MessageListPage) ?? { messages: [] };
+    },
+    async close() {
+      closes++;
+    },
+  });
+
+  return { factory, calls: planeCalls, closed: () => closes };
 }
 
 /** The documented `messages` webhook delivery. */
@@ -295,80 +361,122 @@ describe("photon provider", () => {
     }
   });
 
-  test("a failed send reports what Photon said, not just the status", async () => {
-    // The failure that motivated this: a 415 on chat creation surfaced as
-    // `failed: 415` and nothing else, so the only moves left were guesses —
-    // re-check the credential, re-confirm the config, try another endpoint.
-    // The provider's own sentence is what ends that.
-    stubPhoton((call) =>
-      call.path.includes("/v1/chats")
-        ? Response.json({ message: "unsupported content type" }, { status: 415 })
-        : undefined,
-    );
+  test("a failed send surfaces what the plane said", async () => {
+    // The plane is gRPC, so a failure arrives as a thrown SDK error rather
+    // than a status code the client has to interpret. It must reach the
+    // caller intact — the 415 loop happened because it did not.
+    const plane = fakePlane(() => {
+      throw new Error("[spectrum-imessage] Invalid token");
+    });
+    stubPhoton(() => undefined);
 
     await expect(
-      createPhotonProvider().send({ to: "+15551234567" }, "hi", {
+      createPhotonProvider(plane.factory).send({ to: "+15551234567" }, "hi", {
         idempotencyKey: "k1",
       }),
-    ).rejects.toThrow("415 — unsupported content type");
+    ).rejects.toThrow("[spectrum-imessage] Invalid token");
   });
 
   test("a reply to a known chat mints a token and sends to the guid", async () => {
-    stubPhoton((call) =>
-      call.path.includes("/v1/messages:sendText")
-        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
-        : undefined,
+    const plane = fakePlane((call) =>
+      call.kind === "sendText" ? photonMessage({ guid: "p2p-out" }) : undefined,
     );
+    stubPhoton(() => undefined);
 
-    const result = await createPhotonProvider().send(
+    const result = await createPhotonProvider(plane.factory).send(
       { conversationId: "any;-;+15551234567" },
       "hi",
       { idempotencyKey: "k1" },
     );
 
     expect(result.id).toBe("p2p-out");
+    // The token still comes off the control plane; only the send moved.
     expect(calls[0]?.path).toBe(
       `${PHOTON_CLOUD_BASE}/projects/test-key/imessage/tokens`,
     );
-
-    const send = calls[1];
-    expect(send?.path).toBe(`${PHOTON_IMESSAGE_BASE}/v1/messages:sendText`);
-    const headers = send?.init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer tok_live");
-    expect(headers["x-idempotency-key"]).toBe("k1");
-    expect(JSON.parse(String(send?.init.body))).toMatchObject({
-      chatGuid: "any;-;+15551234567",
-      text: "hi",
-      clientMessageId: "k1",
-    });
+    expect(plane.calls).toEqual([
+      {
+        kind: "sendText",
+        input: {
+          chatGuid: "any;-;+15551234567",
+          text: "hi",
+          clientMessageId: "k1",
+        },
+      },
+    ]);
   });
 
   test("a cold send to a bare handle resolves the chat in the same call", async () => {
     // Photon addresses conversations by chat guid, so a raw handle needs one
     // resolved. Carrying the text along makes that one round trip, not two.
-    stubPhoton((call) =>
-      call.path.includes("/v1/chats")
-        ? Response.json({
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? {
             chat: { guid: "any;-;+15551234567" },
-            initialMessage: { guid: "p2p-first", isFromMe: true },
-          })
+            initialMessage: photonMessage({ guid: "p2p-first" }),
+          }
         : undefined,
     );
+    stubPhoton(() => undefined);
 
-    const result = await createPhotonProvider().send(
+    const result = await createPhotonProvider(plane.factory).send(
       { to: "+15551234567" },
       "hi",
       { idempotencyKey: "k2" },
     );
 
     expect(result.id).toBe("p2p-first");
-    const body = JSON.parse(String(calls[1]?.init.body));
-    expect(body.addresses).toEqual(["+15551234567"]);
-    expect(body.initialMessage).toEqual({ text: "hi" });
-    expect(calls.some((c) => c.path.includes("sendText"))).toBe(false);
+    expect(plane.calls).toHaveLength(1);
+    expect(plane.calls[0]).toEqual({
+      kind: "createChat",
+      input: {
+        addresses: ["+15551234567"],
+        clientMessageId: "k2",
+        text: "hi",
+      },
+    });
   });
 
-  test("a dedicated project routes to its instance", async () => {
+  test("a chat that resolves without a message is sent to explicitly", async () => {
+    // Reporting a delivery that may not have happened is the one outcome
+    // worth a second round trip.
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? { chat: { guid: "any;-;+15551234567" } }
+        : photonMessage({ guid: "p2p-follow" }),
+    );
+    stubPhoton(() => undefined);
+
+    const result = await createPhotonProvider(plane.factory).send(
+      { to: "+15551234567" },
+      "hi",
+      { idempotencyKey: "k5" },
+    );
+
+    expect(result.id).toBe("p2p-follow");
+    expect(plane.calls.map((c) => c.kind)).toEqual(["createChat", "sendText"]);
+  });
+
+  test("the token is minted once and reused", async () => {
+    // A busy line must not mint per message. The SDK asks for a token on
+    // every RPC, so the client's cache is what keeps that off the wire.
+    const plane = fakePlane();
+    stubPhoton(() => undefined);
+    const provider = createPhotonProvider(plane.factory);
+
+    await provider.send({ conversationId: "any;-;+1555" }, "one", {
+      idempotencyKey: "a",
+    });
+    await provider.send({ conversationId: "any;-;+1555" }, "two", {
+      idempotencyKey: "b",
+    });
+
+    const mints = calls.filter((c) => c.path.includes("/imessage/tokens"));
+    expect(mints).toHaveLength(1);
+    expect(plane.calls).toHaveLength(2);
+  });
+
+  test("a dedicated project sends its instance token", async () => {
     stubPhoton((call) =>
       call.path.includes("/imessage/tokens")
         ? Response.json({
@@ -380,74 +488,43 @@ describe("photon provider", () => {
               expiresIn: 600,
             },
           })
-        : Response.json({ message: { guid: "p2p-out", isFromMe: true } }),
-    );
-
-    await createPhotonProvider().send({ conversationId: "any;-;+1555" }, "hi", {
-      idempotencyKey: "k3",
-    });
-
-    const headers = calls[1]?.init.headers as Record<string, string>;
-    expect(headers["x-photon-server"]).toBe("inst-7");
-    expect(headers.Authorization).toBe("Bearer tok_dedicated");
-  });
-
-  test("the token is minted once and reused", async () => {
-    // A busy line must not mint per message.
-    stubPhoton((call) =>
-      call.path.includes("sendText")
-        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
         : undefined,
     );
-    const provider = createPhotonProvider();
 
-    await provider.send({ conversationId: "any;-;+1555" }, "one", {
-      idempotencyKey: "a",
-    });
-    await provider.send({ conversationId: "any;-;+1555" }, "two", {
-      idempotencyKey: "b",
-    });
-
-    const mints = calls.filter((c) => c.path.includes("/imessage/tokens"));
-    expect(mints).toHaveLength(1);
-  });
-
-  test("a token that expired mid-flight is re-minted once", async () => {
-    // Expiry is routine, not an error the caller should have to model.
-    let sends = 0;
-    stubPhoton((call) => {
-      if (!call.path.includes("sendText")) return undefined;
-      sends++;
-      return sends === 1
-        ? new Response("token expired", { status: 401 })
-        : Response.json({ message: { guid: "p2p-retry", isFromMe: true } });
+    let handed: string | undefined;
+    const factory: MessageClientFactory = (opts) => ({
+      async sendText() {
+        handed = await opts.token();
+        return photonMessage({ guid: "p2p-out" });
+      },
+      createChat: () => Promise.resolve({ chat: {} } as never),
+      listRecent: () => Promise.resolve({ messages: [] }),
+      close: () => Promise.resolve(),
     });
 
-    const result = await createPhotonProvider().send(
+    await createPhotonProvider(factory).send(
       { conversationId: "any;-;+1555" },
       "hi",
-      { idempotencyKey: "k4" },
+      { idempotencyKey: "k3" },
     );
 
-    expect(result.id).toBe("p2p-retry");
-    expect(calls.filter((c) => c.path.includes("/imessage/tokens"))).toHaveLength(
-      2,
-    );
+    expect(handed).toBe("tok_dedicated");
   });
 
   test("polling normalizes inside the adapter and skips our own messages", async () => {
-    stubPhoton((call) =>
-      call.path.includes("listRecent")
-        ? Response.json({
+    const plane = fakePlane((call) =>
+      call.kind === "listRecent"
+        ? {
             messages: [
               photonMessage(),
               photonMessage({ guid: "p2p-B2", isFromMe: true }),
             ],
-          })
+          }
         : undefined,
     );
+    stubPhoton(() => undefined);
 
-    const records = await createPhotonProvider().fetchInbound({
+    const records = await createPhotonProvider(plane.factory).fetchInbound({
       since: "2026-07-28T11:00:00.000Z",
       limit: 10,
     });
@@ -459,9 +536,26 @@ describe("photon provider", () => {
     expect(records[1]?.id).toBe("p2p-B2");
     expect(records[1]?.event).toBeUndefined();
 
-    const listed = calls.find((c) => c.path.includes("listRecent"))?.path ?? "";
-    expect(listed).toContain("after=2026-07-28T11%3A00%3A00.000Z");
-    expect(listed).toContain("isFromMe=false");
+    expect(plane.calls[0]?.input).toEqual({
+      after: new Date("2026-07-28T11:00:00.000Z"),
+      limit: 10,
+      isFromMe: false,
+    });
+  });
+
+  test("closing the provider releases the gRPC channel", async () => {
+    // A provider is rebuilt on every settings save, and the plane is a live
+    // connection with its own keepalive. Without this each save leaks one.
+    const plane = fakePlane();
+    stubPhoton(() => undefined);
+    const provider = createPhotonProvider(plane.factory);
+
+    await provider.send({ conversationId: "any;-;+1555" }, "hi", {
+      idempotencyKey: "k",
+    });
+    await provider.close?.();
+
+    expect(plane.closed()).toBe(1);
   });
 
   test("normalizes the documented webhook delivery", () => {
@@ -731,19 +825,16 @@ describe("photon chat resolution", () => {
     // A long reply is several sends to the same recipient — both the skill
     // script and the transport chunk — and re-resolving per chunk would be a
     // round trip per bubble.
-    stubPhoton((call) => {
-      if (call.path.endsWith("/v1/chats")) {
-        return Response.json({
-          chat: { guid: "any;-;+15551234567" },
-          initialMessage: { guid: "p2p-first", isFromMe: true },
-        });
-      }
-      // Everything else but the token mint, which the fixture answers.
-      return call.path.includes("sendText")
-        ? Response.json({ message: { guid: "p2p-next", isFromMe: true } })
-        : undefined;
-    });
-    const provider = createPhotonProvider();
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? {
+            chat: { guid: "any;-;+15551234567" },
+            initialMessage: photonMessage({ guid: "p2p-first" }),
+          }
+        : photonMessage({ guid: "p2p-next" }),
+    );
+    stubPhoton(() => undefined);
+    const provider = createPhotonProvider(plane.factory);
 
     const first = await provider.send({ to: "+15551234567" }, "one", {
       idempotencyKey: "a",
@@ -754,21 +845,44 @@ describe("photon chat resolution", () => {
 
     expect(first.id).toBe("p2p-first");
     expect(second.id).toBe("p2p-next");
-    expect(calls.filter((c) => c.path.endsWith("/v1/chats"))).toHaveLength(1);
-    expect(calls.filter((c) => c.path.includes("sendText"))).toHaveLength(1);
+    expect(plane.calls.map((c) => c.kind)).toEqual(["createChat", "sendText"]);
   });
 
   test("a chat guid target never resolves anything", async () => {
-    stubPhoton((call) =>
-      call.path.includes("sendText")
-        ? Response.json({ message: { guid: "p2p-out", isFromMe: true } })
-        : undefined,
+    const plane = fakePlane(() => photonMessage({ guid: "p2p-out" }));
+    stubPhoton(() => undefined);
+
+    await createPhotonProvider(plane.factory).send(
+      { conversationId: "any;-;+1555" },
+      "hi",
+      { idempotencyKey: "k" },
     );
 
-    await createPhotonProvider().send({ conversationId: "any;-;+1555" }, "hi", {
-      idempotencyKey: "k",
-    });
+    expect(plane.calls.map((c) => c.kind)).toEqual(["sendText"]);
+  });
 
-    expect(calls.some((c) => c.path.endsWith("/v1/chats"))).toBe(false);
+  test("the resolved guid is dropped when the provider closes", async () => {
+    // The cache is keyed by handle and lives as long as the provider. A new
+    // provider must re-resolve rather than trust a guid from a line that may
+    // now be a different project entirely.
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? {
+            chat: { guid: "any;-;+15551234567" },
+            initialMessage: photonMessage({ guid: "p2p-first" }),
+          }
+        : photonMessage({ guid: "p2p-next" }),
+    );
+    stubPhoton(() => undefined);
+    const provider = createPhotonProvider(plane.factory);
+
+    await provider.send({ to: "+15551234567" }, "one", { idempotencyKey: "a" });
+    await provider.close?.();
+    await provider.send({ to: "+15551234567" }, "two", { idempotencyKey: "b" });
+
+    expect(plane.calls.map((c) => c.kind)).toEqual([
+      "createChat",
+      "createChat",
+    ]);
   });
 });

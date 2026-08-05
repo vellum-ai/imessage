@@ -17,9 +17,19 @@ import { createPhotonProvider } from "./photon/adapter.ts";
 import type { MessagingProvider } from "./types.ts";
 import { PROVIDER_IDS } from "./types.ts";
 import type { IMessageConfig } from "../config.ts";
+import type { MessageClientFactory } from "./photon/message-client.ts";
 
 export interface ResolveProviderOptions {
   config: IMessageConfig;
+  /**
+   * Photon's message-plane factory.
+   *
+   * Only ever supplied by tests. The real one opens a gRPC channel on
+   * construction, so without a seam here any test that reaches a send would
+   * dial the network — which is exactly what happened when the plane moved off
+   * `fetch` and the stubs stopped applying.
+   */
+  photonMessageClient?: MessageClientFactory;
 }
 
 export function resolveProvider(
@@ -27,7 +37,7 @@ export function resolveProvider(
 ): MessagingProvider {
   switch (opts.config.provider) {
     case "photon":
-      return createPhotonProvider();
+      return createPhotonProvider(opts.photonMessageClient);
     case "comms":
       return createCommsProvider();
     default:

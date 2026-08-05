@@ -18,6 +18,7 @@ import { WEBHOOK_SECRET_FIELDS } from "./config.ts";
 import type { RuntimeContext } from "./plugin-state.ts";
 import {
   getInitContext,
+  getProvider,
   getSupervisor,
   setChannel,
   setConfig,
@@ -119,6 +120,20 @@ export function stopIngress(): void {
 }
 
 /**
+ * Drop the current provider, giving back anything it holds open.
+ *
+ * Un-awaited on purpose: this runs on the synchronous path that a settings
+ * save and a fresh boot share, and neither should wait on a socket closing.
+ * The provider is already unreachable by the time the close lands, so a
+ * failure has nothing left to affect — hence the swallowed rejection.
+ */
+export function releaseProvider(): void {
+  const previous = getProvider();
+  setProvider(undefined);
+  void previous?.close?.().catch(() => {});
+}
+
+/**
  * Build the provider for `config` and start its ingress.
  *
  * Never throws: a provider that cannot be built, or an ingress mode the
@@ -140,7 +155,7 @@ export function startChannelRuntime(
   // build fails we must not leave the old provider active: outbound would keep
   // going out over a provider the config no longer names, while the settings
   // app reports the new one. Idle is the honest state.
-  setProvider(undefined);
+  releaseProvider();
   setChannel(undefined);
 
   let provider;

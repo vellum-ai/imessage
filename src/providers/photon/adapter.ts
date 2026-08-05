@@ -13,8 +13,8 @@
  */
 
 import { PhotonClient } from "./client.ts";
+import type { MessageClientFactory } from "./message-client.ts";
 import { normalizePhotonMessage, normalizeWebhookEvent } from "./normalize.ts";
-import { createdAtOf } from "./schemas.ts";
 import type {
   EnsureWebhookOptions,
   FetchInboundOptions,
@@ -31,8 +31,11 @@ function isChatGuid(value: string): boolean {
   return value.includes(";");
 }
 
-export function createPhotonProvider(): MessagingProvider {
-  const client = new PhotonClient();
+export function createPhotonProvider(
+  /** Injected by tests so a send never opens a real gRPC channel. */
+  makeMessageClient?: MessageClientFactory,
+): MessagingProvider {
+  const client = new PhotonClient(makeMessageClient);
 
   /**
    * Chat guids resolved for a bare handle, for this provider's lifetime.
@@ -73,14 +76,16 @@ export function createPhotonProvider(): MessagingProvider {
       fetchOpts: FetchInboundOptions,
     ): Promise<InboundRecord[]> {
       const response = await client.listRecent({
-        after: fetchOpts.since,
+        ...(fetchOpts.since ? { after: new Date(fetchOpts.since) } : {}),
         limit: fetchOpts.limit,
         isFromMe: false,
       });
 
       return response.messages.map((message) => ({
         id: message.guid,
-        createdAt: createdAtOf(message),
+        // The cursor is stored as a string; the SDK decodes protobuf
+        // timestamps into `Date`, so this is where the two meet.
+        createdAt: message.dateCreated.toISOString(),
         // Normalizing here, inside the adapter, is what keeps the poller
         // provider-agnostic: it never sees a Photon-shaped payload.
         event: normalizePhotonMessage(message, new Date().toISOString()),
@@ -178,6 +183,11 @@ export function createPhotonProvider(): MessagingProvider {
       receivedAt: string,
     ): PluginInboundEvent | undefined {
       return normalizeWebhookEvent(raw, receivedAt);
+    },
+
+    async close(): Promise<void> {
+      chatGuids.clear();
+      await client.close();
     },
   };
 }

@@ -16,11 +16,11 @@ import {
   ConfigUpdateSchema,
   ConfigValidationError,
   CredentialUpdateSchema,
-  EDITABLE_CONFIG_KEYS,
   ProviderChangeSchema,
   readConfigView,
 } from "./app-settings.ts";
 import { startChannelRuntime } from "./channel-runtime.ts";
+import { INGRESS_MODES } from "./config.ts";
 import { getProvider } from "./plugin-state.ts";
 import { pluginConfigPath } from "./plugin-paths.ts";
 import { PROVIDER_IDS } from "./providers/types.ts";
@@ -44,13 +44,24 @@ function json(body: unknown, status = 200): Response {
  * `credentials` rides along rather than sitting behind its own GET: the app
  * needs it to draw the very first frame, and a second round trip would only
  * buy a moment of rendering fields whose state is unknown.
+ *
+ * `providers` and `ingressModes` are what the plugin actually supports; the
+ * app holds only the copy describing them, and renders the intersection. That
+ * is the same split the provider dropdown already used, extended to ingress so
+ * a mode removed here disappears from the panel rather than lingering as an
+ * option that fails validation on save.
+ *
+ * What is deliberately not sent is a list of *editable keys*. Which controls
+ * exist is the app's own decision, and naming them here was a second place for
+ * that to be stated and to be wrong — `sendChannel` sat in that list long after
+ * it stopped meaning anything on the default provider.
  */
 export async function handleSettingsGet(): Promise<Response> {
   const config = readConfigView(pluginConfigPath());
   return json({
     config,
-    editableKeys: EDITABLE_CONFIG_KEYS,
     providers: PROVIDER_IDS,
+    ingressModes: INGRESS_MODES,
     activeProvider: getProvider()?.id ?? null,
     credentials: await readCredentialStatus(),
   });

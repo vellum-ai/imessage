@@ -43,7 +43,6 @@ export async function runWorker(bootstrap: WorkerBootstrap): Promise<Poller> {
     provider: bootstrap.provider,
     ingressMode: "poll",
     pollIntervalMs: bootstrap.intervalMs,
-    sendChannel: bootstrap.sendChannel,
     allowedHandles: bootstrap.allowedHandles,
   });
 

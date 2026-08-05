@@ -29,7 +29,7 @@ export function resolveProvider(
     case "photon":
       return createPhotonProvider();
     case "comms":
-      return createCommsProvider({ sendChannel: opts.config.sendChannel });
+      return createCommsProvider();
     default:
       // Unreachable through the config schema, which validates against
       // `PROVIDER_IDS`. Reachable if a caller hands over a config it built

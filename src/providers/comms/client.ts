@@ -10,11 +10,7 @@
  */
 
 import { resolveApiKey } from "../../config.ts";
-import type {
-  CommsChannel,
-  CommsMessage,
-  ListMessagesResponse,
-} from "./schemas.ts";
+import type { CommsMessage, ListMessagesResponse } from "./schemas.ts";
 import {
   ListMessagesResponseSchema,
   SendMessageResponseSchema,
@@ -49,7 +45,6 @@ export interface SendMessageInput {
   /** Existing conversation. Required unless `to` is set. */
   conversationId?: string;
   body: string;
-  channel?: CommsChannel;
   /**
    * Stable key so a retried send does not double-deliver. Comms answers 200
    * with `duplicate: true` instead of sending again.
@@ -102,8 +97,10 @@ export class CommsClient {
         ...(input.conversationId
           ? { conversation_id: input.conversationId }
           : {}),
+        // No `channel`: Comms picks iMessage where the handle supports it and
+        // falls back to SMS, per recipient. Forcing one is worse than that on
+        // every line we know of, so the plugin does not offer the choice.
         body: input.body,
-        ...(input.channel ? { channel: input.channel } : {}),
       }),
     });
 

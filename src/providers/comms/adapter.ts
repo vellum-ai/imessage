@@ -26,16 +26,8 @@ import type {
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveApiKey } from "../../config.ts";
-import type { CommsChannel } from "./schemas.ts";
 
-export interface CommsAdapterOptions {
-  /** Forced delivery channel, or `undefined` to let Comms choose. */
-  sendChannel?: CommsChannel;
-}
-
-export function createCommsProvider(
-  opts: CommsAdapterOptions = {},
-): MessagingProvider {
+export function createCommsProvider(): MessagingProvider {
   const client = new CommsClient();
 
   return {
@@ -107,7 +99,6 @@ export function createCommsProvider(
           ? { to: target.to }
           : { conversationId: target.conversationId }),
         body,
-        channel: opts.sendChannel,
         idempotencyKey: sendOpts.idempotencyKey,
       });
       return { id: message?.id };

@@ -79,6 +79,36 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   },
 ];
 
+/**
+ * Display copy for each ingress mode. Which ones exist comes from the plugin,
+ * the same way the provider list does; this only says how to describe them.
+ *
+ * Webhook is the default and the one to use: the provider pushes, so a text
+ * becomes a turn in about a second. Polling exists for a deployment the
+ * provider cannot reach — no tunnel, no public ingress URL — where a webhook
+ * would be registered against a URL that answers nothing. Without this control
+ * such a deployment had no way off the default from here.
+ *
+ * `pollIntervalMs` is deliberately absent. It is bounded in the config schema,
+ * its default is right for both providers' rate limits, and someone who
+ * genuinely needs to tune it can edit `config.json` — which is a better trade
+ * than a number input that mostly invites people to set it to 500.
+ */
+const INGRESS_MODE_CATALOG = [
+  {
+    id: "webhook",
+    label: "Webhook (recommended)",
+    note: "The provider delivers each message as it arrives. Needs a public ingress URL the provider can reach.",
+  },
+  {
+    id: "poll",
+    label: "Polling",
+    note: "The plugin checks for new messages on a timer. Slower, but works where the provider cannot reach this assistant.",
+  },
+] as const;
+
+type IngressMode = (typeof INGRESS_MODE_CATALOG)[number]["id"];
+
 const STYLES = `
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -182,8 +212,9 @@ type Credentials = Record<string, CredentialField[]>;
 type ChannelStatus = "running" | "idle" | "not-loaded";
 
 interface Settings {
-  config: { provider: string };
+  config: { provider: string; ingressMode: IngressMode };
   providers: string[];
+  ingressModes: string[];
   activeProvider: string | null;
   /** Every provider's fields, keyed by provider id. */
   credentials: Credentials;
@@ -275,6 +306,7 @@ function ExternalLinkIcon(): React.ReactElement {
 function App(): React.ReactElement {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [draftProvider, setDraftProvider] = useState<string | null>(null);
+  const [draftIngress, setDraftIngress] = useState<IngressMode | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,9 +319,10 @@ function App(): React.ReactElement {
         `${BASE}/settings`,
       );
       setSettings(next);
-      // Follow the configured provider unless a draft is already on screen: a
+      // Follow the configured values unless a draft is already on screen: a
       // reload must not silently move the panel off what the user is editing.
       setDraftProvider((current) => current ?? next.config.provider);
+      setDraftIngress((current) => current ?? next.config.ingressMode);
       setError(null);
     } catch (err) {
       setError(messageOf(err));
@@ -301,6 +334,7 @@ function App(): React.ReactElement {
   }, [load]);
 
   const serverProvider = settings?.config.provider ?? null;
+  const serverIngress = settings?.config.ingressMode ?? null;
 
   /** Providers the plugin offers, in catalog order. */
   const options = useMemo(
@@ -311,13 +345,22 @@ function App(): React.ReactElement {
     [settings],
   );
 
+  /** Ingress modes the plugin offers, in catalog order. */
+  const ingressOptions = useMemo(
+    () =>
+      INGRESS_MODE_CATALOG.filter((mode) =>
+        (settings?.ingressModes ?? []).includes(mode.id),
+      ),
+    [settings],
+  );
+
   const catalog = draftProvider ? KNOWN_PROVIDERS.get(draftProvider) : undefined;
   const fields: CredentialField[] = draftProvider
     ? (settings?.credentials[draftProvider] ?? [])
     : [];
 
   const save = useCallback(async () => {
-    if (!draftProvider || !settings) return;
+    if (!draftProvider || !draftIngress || !settings) return;
     setSaving(true);
     setError(null);
 
@@ -333,9 +376,11 @@ function App(): React.ReactElement {
       let result: ChannelResult = {};
       let what = "Saved.";
 
-      // Provider first, then credentials. The switch restarts ingress on a
-      // provider whose key may be missing; storing the key restarts it again,
-      // which is the pass that actually comes up.
+      // Provider, then ingress mode, then credentials. Each of the three
+      // restarts the channel, so the order decides which restart is the one
+      // still standing when the notice is written — and that should be the
+      // last pass, on the final configuration, with the key in place. Doing
+      // credentials first would report on a channel two edits out of date.
       if (draftProvider !== settings.config.provider) {
         result = await apiRequest<ChannelResult>(
           `Switching to ${labelFor(draftProvider)}`,
@@ -347,6 +392,21 @@ function App(): React.ReactElement {
           },
         );
         what = `Switched to ${labelFor(draftProvider)}.`;
+      }
+
+      if (draftIngress !== settings.config.ingressMode) {
+        result = await apiRequest<ChannelResult>(
+          "Saving ingress mode",
+          `${BASE}/settings`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ingressMode: draftIngress }),
+          },
+        );
+        // `what` is left alone: it already reads "Saved.", and when the
+        // provider also changed, "Switched to Photon." is the more useful
+        // sentence to keep.
       }
 
       if (Object.keys(values).length > 0) {
@@ -369,13 +429,14 @@ function App(): React.ReactElement {
     } finally {
       setSaving(false);
     }
-  }, [draftProvider, drafts, fields, load, settings]);
+  }, [draftIngress, draftProvider, drafts, fields, load, settings]);
 
   const reset = useCallback(() => {
     setDrafts({});
     setDraftProvider(serverProvider);
+    setDraftIngress(serverIngress);
     setNotice(null);
-  }, [serverProvider]);
+  }, [serverIngress, serverProvider]);
 
   if (error && !settings) {
     return (
@@ -386,7 +447,7 @@ function App(): React.ReactElement {
     );
   }
 
-  if (!settings || !draftProvider) {
+  if (!settings || !draftProvider || !draftIngress) {
     return (
       <div className="app">
         <style>{STYLES}</style>
@@ -398,7 +459,9 @@ function App(): React.ReactElement {
   const typed = fields.some(
     (spec) => (drafts[spec.field] ?? "").trim().length > 0,
   );
-  const hasChanges = draftProvider !== serverProvider || typed;
+  const hasChanges =
+    draftProvider !== serverProvider || draftIngress !== serverIngress || typed;
+  const ingress = ingressOptions.find((mode) => mode.id === draftIngress);
 
   return (
     <div className="app">
@@ -479,6 +542,25 @@ function App(): React.ReactElement {
               </div>
             </div>
           ) : null}
+
+          <div className="field">
+            <label htmlFor="ingressMode">Inbound messages</label>
+            <select
+              id="ingressMode"
+              value={draftIngress}
+              disabled={saving}
+              onChange={(event) =>
+                setDraftIngress(event.target.value as IngressMode)
+              }
+            >
+              {ingressOptions.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+            {ingress ? <p className="note">{ingress.note}</p> : null}
+          </div>
 
           <div className="actions">
             <button

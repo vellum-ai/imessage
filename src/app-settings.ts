@@ -33,20 +33,11 @@ export const ConfigUpdateSchema = z
   .object({
     ingressMode: z.enum(INGRESS_MODES).optional(),
     pollIntervalMs: z.number().int().optional(),
-    sendChannel: z.enum(["sms", "imessage"]).optional(),
     allowedHandles: z.array(z.string()).optional(),
   })
   .strict();
 
 export type ConfigUpdate = z.infer<typeof ConfigUpdateSchema>;
-
-/** Config keys the app renders as editable, in display order. */
-export const EDITABLE_CONFIG_KEYS = [
-  "ingressMode",
-  "pollIntervalMs",
-  "sendChannel",
-  "allowedHandles",
-] as const;
 
 /** Body accepted by the dedicated provider-change route. */
 export const ProviderChangeSchema = z

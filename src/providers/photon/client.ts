@@ -24,6 +24,7 @@
  * request mapping.
  */
 
+import { describeApiFailure } from "../error-detail.ts";
 import {
   ChatSchema,
   CreateChatResponseSchema,
@@ -417,7 +418,7 @@ export class PhotonClient {
 
       const body = await response.text().catch(() => undefined);
       lastError = new PhotonApiError(
-        `${label} failed: ${response.status}`,
+        describeApiFailure(label, response.status, body),
         response.status,
         body,
       );

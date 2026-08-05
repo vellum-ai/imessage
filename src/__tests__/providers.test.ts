@@ -138,6 +138,21 @@ describe("comms provider", () => {
     expect(records[0]?.event).toBeUndefined();
   });
 
+  test("a failed send reports what Comms said, not just the status", async () => {
+    stubFetch(() =>
+      Response.json(
+        { error: { message: "scope comms_send missing" } },
+        { status: 403 },
+      ),
+    );
+
+    await expect(
+      createCommsProvider().send({ to: "+15551234567" }, "hi", {
+        idempotencyKey: "k1",
+      }),
+    ).rejects.toThrow("403 — scope comms_send missing");
+  });
+
   test("send forwards the idempotency key and bearer token", async () => {
     stubFetch(() =>
       Response.json({ message: { id: "msg_out", direction: "outbound" } }),
@@ -278,6 +293,24 @@ describe("photon provider", () => {
       expect(readiness.reason).toContain("Photon project ID");
       expect(readiness.reason).toContain("settings app");
     }
+  });
+
+  test("a failed send reports what Photon said, not just the status", async () => {
+    // The failure that motivated this: a 415 on chat creation surfaced as
+    // `failed: 415` and nothing else, so the only moves left were guesses —
+    // re-check the credential, re-confirm the config, try another endpoint.
+    // The provider's own sentence is what ends that.
+    stubPhoton((call) =>
+      call.path.includes("/v1/chats")
+        ? Response.json({ message: "unsupported content type" }, { status: 415 })
+        : undefined,
+    );
+
+    await expect(
+      createPhotonProvider().send({ to: "+15551234567" }, "hi", {
+        idempotencyKey: "k1",
+      }),
+    ).rejects.toThrow("415 — unsupported content type");
   });
 
   test("a reply to a known chat mints a token and sends to the guid", async () => {

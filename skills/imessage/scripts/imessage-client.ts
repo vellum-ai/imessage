@@ -33,8 +33,6 @@ export interface SentChunk {
 export interface SendOptions {
   to: string;
   body: string;
-  /** Force `sms` or `imessage` where the provider honors it. */
-  channel?: "sms" | "imessage";
 }
 
 /**
@@ -65,12 +63,8 @@ export function normalizeRecipient(raw: string): string {
  * of order.
  */
 export async function sendMessage(opts: SendOptions): Promise<SentChunk[]> {
-  const config = readConfigView(pluginConfigPath());
-  // `--channel` is the same knob as the `sendChannel` config field, so it
-  // rides in as a config override rather than as a second path through the
-  // provider.
   const provider = resolveProvider({
-    config: opts.channel ? { ...config, sendChannel: opts.channel } : config,
+    config: readConfigView(pluginConfigPath()),
   });
 
   const to = normalizeRecipient(opts.to);

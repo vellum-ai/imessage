@@ -125,9 +125,8 @@ Optional, in the plugin's `config.json`:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `provider` | `"photon"` | `"photon"` or `"comms"`. Set it from the settings app, which restarts ingress; editing it here needs a reload. |
-| `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. |
-| `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
-| `sendChannel` | unset | Force `"sms"` or `"imessage"`. Leave unset. |
+| `ingressMode` | `"webhook"` | `"webhook"` or `"poll"`. Set it from the settings app, which restarts ingress. |
+| `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only, and not surfaced in the settings app. |
 | `allowedHandles` | `[]` | E.164 handles allowed through. Empty allows all. |
 
 `allowedHandles` is a coarse pre-filter, not a security control — the

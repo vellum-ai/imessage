@@ -141,17 +141,6 @@ export const IMessageConfigSchema = z.object({
     .default(5_000)
     .describe("Delay between polls, in milliseconds. Only used in poll mode."),
   /**
-   * Preferred send channel. `undefined` lets Comms
-   * choose, which is the documented default and right for most lines: it uses
-   * iMessage where the handle supports it and falls back to SMS.
-   */
-  sendChannel: z
-    .enum(["sms", "imessage"])
-    .optional()
-    .describe(
-      "Force a delivery channel for outbound messages. Omit to let the provider choose.",
-    ),
-  /**
    * Handles allowed to reach the assistant. Empty means no plugin-side filter
    * — the gateway's admission floor is the real gate, this is a coarse
    * pre-filter for a line that is also used for something else.

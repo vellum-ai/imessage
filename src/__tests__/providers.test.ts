@@ -154,17 +154,19 @@ describe("comms provider", () => {
     expect(headers.Authorization).toBe("Bearer test-key");
   });
 
-  test("forces the configured send channel", async () => {
+  test("leaves the delivery channel to Comms", async () => {
+    // Comms picks iMessage where the handle supports it and falls back to SMS,
+    // per recipient. Naming a channel would override that for every message.
     stubFetch(() =>
       Response.json({ message: { id: "m", direction: "outbound" } }),
     );
-    await createCommsProvider({ sendChannel: "imessage" }).send(
-      { to: "+15551234567" },
-      "hi",
-      { idempotencyKey: "k" },
-    );
+    await createCommsProvider().send({ to: "+15551234567" }, "hi", {
+      idempotencyKey: "k",
+    });
 
-    expect(JSON.parse(String(calls[0]?.init.body)).channel).toBe("imessage");
+    expect(JSON.parse(String(calls[0]?.init.body))).not.toHaveProperty(
+      "channel",
+    );
   });
 
   test("readiness reports a missing key rather than throwing", async () => {

@@ -89,9 +89,9 @@ describe("applyConfigUpdate", () => {
   });
 
   test("writes to a fresh config file", () => {
-    const view = applyConfigUpdate(configPath, { sendChannel: "sms" });
-    expect(view.sendChannel).toBe("sms");
-    expect(readConfigView(configPath).sendChannel).toBe("sms");
+    const view = applyConfigUpdate(configPath, { ingressMode: "poll" });
+    expect(view.ingressMode).toBe("poll");
+    expect(readConfigView(configPath).ingressMode).toBe("poll");
   });
 });
 
@@ -113,10 +113,17 @@ describe("ConfigUpdateSchema", () => {
       ConfigUpdateSchema.safeParse({
         ingressMode: "poll",
         pollIntervalMs: 10_000,
-        sendChannel: "imessage",
         allowedHandles: ["+15551234567"],
       }).success,
     ).toBe(true);
+  });
+
+  test("rejects sendChannel, which the plugin no longer has", () => {
+    // Forcing a delivery channel only ever meant something on Comms, and the
+    // provider's own per-recipient choice is the better answer there too.
+    expect(
+      ConfigUpdateSchema.safeParse({ sendChannel: "sms" }).success,
+    ).toBe(false);
   });
 });
 

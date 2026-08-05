@@ -41,9 +41,8 @@ bun skills/imessage/scripts/send.ts --to "+15551234567" --body "your message"
 rejected rather than guessed at, so if you only have a partial number, ask
 rather than assuming a country code.
 
-Optional `--channel sms` or `--channel imessage` forces delivery. Omit it — the
-provider picks correctly, and forcing SMS on a recipient who supports iMessage
-just makes the message green and costs more.
+The transport is the provider's call: iMessage where the recipient supports it,
+SMS otherwise, decided per recipient. There is nothing to pass.
 
 ## Writing the message
 

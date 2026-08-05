@@ -10,6 +10,7 @@
  */
 
 import { resolveApiKey } from "../../config.ts";
+import { describeApiFailure } from "../error-detail.ts";
 import type { CommsMessage, ListMessagesResponse } from "./schemas.ts";
 import {
   ListMessagesResponseSchema,
@@ -173,7 +174,11 @@ export class CommsClient {
 
       const body = await response.text().catch(() => undefined);
       lastError = new CommsApiError(
-        `Comms API ${init.method ?? "GET"} ${path} failed: ${response.status}`,
+        describeApiFailure(
+          `Comms API ${init.method ?? "GET"} ${path}`,
+          response.status,
+          body,
+        ),
         response.status,
         body,
       );

@@ -182,7 +182,6 @@ export function startChannelRuntime(
       storageDir: ctx.pluginStorageDir,
       intervalMs: config.pollIntervalMs,
       provider: config.provider,
-      allowedHandles: config.allowedHandles,
     },
     logger: ctx.logger,
     sink: (event) => {

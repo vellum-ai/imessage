@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  IMessageConfigSchema,
-  isAllowedHandle,
-  resolveConfig,
-} from "../config.ts";
+import { IMessageConfigSchema, resolveConfig } from "../config.ts";
 
 describe("resolveConfig", () => {
   test("defaults to photon over webhooks", () => {
@@ -13,7 +9,6 @@ describe("resolveConfig", () => {
     const { config } = resolveConfig({});
     expect(config.provider).toBe("photon");
     expect(config.ingressMode).toBe("webhook");
-    expect(config.allowedHandles).toEqual([]);
   });
 
   test("accepts an absent config", () => {
@@ -67,18 +62,5 @@ describe("resolveConfig", () => {
     expect(
       IMessageConfigSchema.safeParse({ pollIntervalMs: 30_000 }).success,
     ).toBe(true);
-  });
-});
-
-describe("isAllowedHandle", () => {
-  test("an empty allowlist admits everything", () => {
-    const { config } = resolveConfig({});
-    expect(isAllowedHandle(config, "+15551234567")).toBe(true);
-  });
-
-  test("a populated allowlist admits only its members", () => {
-    const { config } = resolveConfig({ allowedHandles: ["+15551234567"] });
-    expect(isAllowedHandle(config, "+15551234567")).toBe(true);
-    expect(isAllowedHandle(config, "+15559990000")).toBe(false);
   });
 });

@@ -21,7 +21,6 @@ const BOOTSTRAP = {
   storageDir: "/tmp/imessage-test",
   intervalMs: 5_000,
   provider: "comms" as const,
-  allowedHandles: [],
 };
 
 function event(id: string): PluginInboundEvent {

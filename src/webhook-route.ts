@@ -18,7 +18,6 @@
  * get subtly wrong.
  */
 
-import { isAllowedHandle } from "./config.ts";
 import { getConfig } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
 import type { ProviderId } from "./providers/types.ts";
@@ -70,12 +69,16 @@ export async function handleProviderWebhook(
     return json(200, { ok: true, ignored: "not an inbound message" });
   }
 
-  if (!isAllowedHandle(config, event.actor.actorExternalId)) {
-    return json(200, { ok: true, ignored: "handle outside the allowlist" });
-  }
-
   // TODO(pluggable-channels): forward to the host's inbound pipeline so the
   // event runs through the kill switch, trust classification, and the
   // admission floor. See the matching note in hooks/init.ts.
+  //
+  // Who is allowed to reach the assistant is decided there, not here. The
+  // gateway holds `contact_channels` — the ACL's own table, keyed on
+  // (type, address) with a per-channel status and policy — and classifies the
+  // actor before this plugin is involved. A plugin-side allowlist read from
+  // `config.json` used to sit at this line; it could only ever be a
+  // hand-maintained shadow of that table, and the way it failed was to
+  // silently drop messages from someone the user had already added.
   return json(200, { ok: true });
 }

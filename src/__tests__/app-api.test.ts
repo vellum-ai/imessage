@@ -69,11 +69,11 @@ describe("errorDetail", () => {
       error: "invalid settings update",
       detail: [
         { path: "pollIntervalMs", message: "too small" },
-        { path: "allowedHandles.0", message: "not E.164" },
+        { path: "ingressMode", message: "invalid option" },
       ],
     });
     expect(errorDetail(body)).toBe(
-      "invalid settings update (pollIntervalMs: too small; allowedHandles.0: not E.164)",
+      "invalid settings update (pollIntervalMs: too small; ingressMode: invalid option)",
     );
   });
 

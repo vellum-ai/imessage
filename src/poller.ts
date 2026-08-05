@@ -39,13 +39,15 @@ export interface PollerOptions {
   storageDir: string;
   intervalMs: number;
   logger: PollerLogger;
-  /** Where normalized events go. */
-  sink: (event: PluginInboundEvent) => Promise<void> | void;
   /**
-   * Coarse pre-filter on the sender handle. The gateway's admission floor is
-   * the real gate; this just keeps a shared line's other traffic out.
+   * Where normalized events go.
+   *
+   * Everything the line receives, unfiltered. Deciding who may reach the
+   * assistant belongs to the host's inbound pipeline, which classifies the
+   * actor against the gateway's own contact ACL — see the note in
+   * `webhook-route.ts`.
    */
-  isAllowed?: (actorExternalId: string) => boolean;
+  sink: (event: PluginInboundEvent) => Promise<void> | void;
   /** Injectable for tests. */
   now?: () => Date;
 }
@@ -119,17 +121,6 @@ export class Poller {
 
         const event = record.event;
         if (!event) continue;
-
-        if (
-          this.opts.isAllowed &&
-          !this.opts.isAllowed(event.actor.actorExternalId)
-        ) {
-          this.opts.logger.debug(
-            { actorExternalId: event.actor.actorExternalId },
-            "imessage: dropped message from handle outside the allowlist",
-          );
-          continue;
-        }
 
         await this.opts.sink(event);
         delivered++;

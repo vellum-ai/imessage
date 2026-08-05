@@ -113,32 +113,32 @@ describe("ConfigUpdateSchema", () => {
       ConfigUpdateSchema.safeParse({
         ingressMode: "poll",
         pollIntervalMs: 10_000,
-        allowedHandles: ["+15551234567"],
       }).success,
     ).toBe(true);
   });
 
-  test("rejects sendChannel, which the plugin no longer has", () => {
-    // Forcing a delivery channel only ever meant something on Comms, and the
-    // provider's own per-recipient choice is the better answer there too.
+  test("rejects fields the plugin no longer has", () => {
+    // `sendChannel` only ever meant something on Comms, whose own
+    // per-recipient choice is the better answer anyway. `allowedHandles` was a
+    // hand-maintained shadow of the gateway's contact ACL, which decides this
+    // before the plugin is involved.
+    expect(ConfigUpdateSchema.safeParse({ sendChannel: "sms" }).success).toBe(
+      false,
+    );
     expect(
-      ConfigUpdateSchema.safeParse({ sendChannel: "sms" }).success,
+      ConfigUpdateSchema.safeParse({ allowedHandles: ["+15551234567"] }).success,
     ).toBe(false);
   });
 });
 
 describe("applyProviderChange", () => {
   test("persists the provider and keeps other fields", () => {
-    writeFileSync(
-      configPath,
-      JSON.stringify({ allowedHandles: ["+1555"] }),
-      "utf-8",
-    );
+    writeFileSync(configPath, JSON.stringify({ ingressMode: "poll" }), "utf-8");
 
     const view = applyProviderChange(configPath, { provider: "comms" });
 
     expect(view.provider).toBe("comms");
-    expect(view.allowedHandles).toEqual(["+1555"]);
+    expect(view.ingressMode).toBe("poll");
   });
 
   test("rejects an unknown provider", () => {

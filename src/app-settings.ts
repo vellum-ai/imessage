@@ -33,7 +33,6 @@ export const ConfigUpdateSchema = z
   .object({
     ingressMode: z.enum(INGRESS_MODES).optional(),
     pollIntervalMs: z.number().int().optional(),
-    allowedHandles: z.array(z.string()).optional(),
   })
   .strict();
 

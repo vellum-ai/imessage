@@ -95,17 +95,17 @@ describe("handleProviderWebhook", () => {
       .toMatchObject({ ignored: "not an inbound message" });
   });
 
-  test("a handle outside the allowlist is dropped", async () => {
-    setConfig(
-      IMessageConfigSchema.parse({
-        provider: "comms",
-        allowedHandles: ["+15559999999"],
-      }),
-    );
+  test("forwards every inbound message, filtering none by sender", async () => {
+    // The plugin no longer decides who may reach the assistant. That belongs
+    // to the host's inbound pipeline, which classifies the actor against the
+    // gateway's contact ACL; a second list here could only disagree with it.
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
 
-    expect(
-      await bodyOf(await handleProviderWebhook("comms", post(commsDelivery()))),
-    ).toMatchObject({ ignored: "handle outside the allowlist" });
+    const body = await bodyOf(
+      await handleProviderWebhook("comms", post(commsDelivery())),
+    );
+    expect(body).toMatchObject({ ok: true });
+    expect(body).not.toHaveProperty("ignored");
   });
 
   test("an unparsable body is acknowledged, not retried", async () => {

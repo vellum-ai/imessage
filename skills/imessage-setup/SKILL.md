@@ -113,13 +113,6 @@ start, pointing the provider at its own route,
 host — a managed platform callback route, or a configured public ingress — so
 there is nothing to compose or configure here.
 
-Two things still have to be true for a delivery to land: a guardian must have
-approved the plugin's ingress declaration, and the gateway must be new enough
-to read the verification descriptors in `channels/ingress.json`. A gateway that
-predates them checks a `Vellum-Signature` header neither vendor can send, so
-every delivery is a 403 before the plugin sees it. If inbound is silent in
-webhook mode, check those two before anything else.
-
 ## Configuration
 
 Optional, in the plugin's `config.json`:

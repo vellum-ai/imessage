@@ -27,6 +27,37 @@ before anything else: it has to read the verification descriptors in
 delivery with a 403 before the plugin sees it. Switching to poll sidesteps the
 question entirely. In poll mode, check that the key carries `comms_read`.
 
+**`{"error":"Not Found"}` on every delivery** — that body is the gateway's, and
+it means the gateway found no servable route at that path. It says nothing more
+on purpose: the path is reachable by anyone on the internet, so a route held
+back by approval is answered identically to one nobody declared. Two causes
+produce it, and the listing tells them apart. From the assistant host:
+
+```
+curl -s localhost:7830/v1/channel-ingress
+```
+
+*The declaration is `pending`.* Both routes verify against a secret this plugin
+holds rather than the platform's, so neither is served until a guardian
+approves:
+
+```
+curl -s -X POST localhost:7830/v1/channel-ingress/imessage/approve \
+  -H 'content-type: application/json' -d '{"digest":"<digest>"}'
+```
+
+The digest covers what the declaration asks for, so editing `ingress.json` —
+adding a route, changing what verifies one — drops it back to pending and needs
+a fresh approval. An approved route whose credential is not set answers 409
+rather than 404; the listing names the credential each route reads.
+
+*The declaration is `approved` and deliveries still 404.* Check the path that
+actually arrived. The platform's callback layer redirects a slashless request
+to a trailing-slash URL, and a gateway that predates that tolerance matches the
+requested spelling against the declared `events-comms` exactly. Nothing on this
+side can avoid it — the slash is re-added downstream of whatever the plugin
+registered — so the fix is a gateway new enough to ignore it.
+
 **Checking inbound without waiting for a text** — on Comms, `POST
 /api/v1/comms/webhooks/{id}/test` sends a signed `comms.ping` through the real
 delivery pipeline (same envelope, same signature). A 403 at the gateway means

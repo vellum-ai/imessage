@@ -37,6 +37,41 @@ unresolved.
 
 The `imessage-setup` skill walks through the whole thing, including inbound.
 
+## Provider APIs
+
+Both vendors have shapes that cost real time to rediscover, so they are written
+down here rather than left in the code.
+
+**Photon runs two planes with two protocols.** The control plane
+(`spectrum.photon.codes`) is REST with `Basic base64(projectId:projectSecret)`,
+and every response is enveloped as `{ succeed, data }` — a failure can arrive
+inside a 200, so the envelope is what gets checked. It handles projects, the
+token mint, webhooks, and users. The message plane
+(`imessage.spectrum.photon.codes:443`) is **gRPC only** and answers 415 with an
+empty body to anything else, including a bodiless `GET /`. Its REST routes are
+real but belong to `imessage-server-v2-http`, a middleware Photon publishes as
+software rather than hosting, so reaching the hosted plane means the vendor SDK.
+`src/providers/photon/message-client.ts` is the only file that imports it.
+
+**A Photon project may only message people it knows.** Anyone else is refused
+at the message plane with `Target not allowed for this project`, which reads
+like a bad address but is a policy answer. `POST /projects/{id}/users/`
+registers a recipient; it is idempotent, and the plugin calls it on the first
+send to a new number. A shared project allocates each user their own
+`assignedPhoneNumber` out of a pool, which is the concrete reason a shared line
+cannot promise anyone a stable number.
+
+**A Photon webhook's `signingSecret` is returned once** and is never
+retrievable, so a lost one means delete and re-register.
+
+**Comms** (`osis.co/api/v1/comms`) is one REST API with bearer auth and the
+scopes `comms_send` / `comms_read` / `comms_webhooks`, fixed at key creation.
+It signs deliveries with `X-Osis-Signature: sha256=<hmac of the raw body>`,
+using a secret returned when the webhook is registered. Its published docs
+specify the message object as `{ id, body, direction }` only, so anything
+beyond that is marked `UNVERIFIED` in `src/providers/comms/schemas.ts` and is
+optional: a wrong guess degrades rather than drops a message.
+
 ## Development
 
 ```bash

@@ -64,7 +64,18 @@ function stubControlPlane(): void {
     url: string | URL | Request,
     init?: RequestInit,
   ) => {
-    calls.push({ url: String(url), init: init ?? {} });
+    const href = String(url);
+    calls.push({ url: href, init: init ?? {} });
+
+    if (href.endsWith("/imessage/")) {
+      return Response.json({ succeed: true, data: { type: "shared" } });
+    }
+    if (href.endsWith("/users/")) {
+      return Response.json({
+        succeed: true,
+        data: { id: "usr_1", phoneNumber: "+15551234567" },
+      });
+    }
     return Response.json({
       succeed: true,
       data: { type: "shared", token: "tok_live", expiresIn: 600 },
@@ -124,8 +135,14 @@ describe("skill send", () => {
     );
 
     expect(sent).toEqual([{ id: "p2p-first", body: "hello" }]);
-    // The token mint is the only HTTP call left in a send.
-    expect(pathsCalled()).toEqual(["/projects/proj_1/imessage/tokens"]);
+    // What is left on HTTP: read the project type, register the recipient as
+    // a user, mint a token. Photon refuses to message anyone the project does
+    // not know, so the registration is part of a cold send, not setup.
+    expect(pathsCalled()).toEqual([
+      "/projects/proj_1/imessage/",
+      "/projects/proj_1/users/",
+      "/projects/proj_1/imessage/tokens",
+    ]);
     expect(planeCalls.map((c) => c.kind)).toEqual(["createChat"]);
   });
 
@@ -143,8 +160,12 @@ describe("skill send", () => {
     expect(planeCalls.filter((c) => c.kind === "sendText")).toHaveLength(
       sent.length - 1,
     );
-    // One mint for the whole reply, however many bubbles it becomes.
-    expect(calls).toHaveLength(1);
+    // The recipient is registered once, and the token minted once, however
+    // many bubbles the reply becomes.
+    expect(pathsCalled().filter((p) => p.endsWith("/users/"))).toHaveLength(1);
+    expect(
+      pathsCalled().filter((p) => p.endsWith("/imessage/tokens")),
+    ).toHaveLength(1);
   });
 
   test("every chunk carries its own idempotency key", async () => {

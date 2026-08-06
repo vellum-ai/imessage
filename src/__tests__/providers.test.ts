@@ -230,8 +230,18 @@ function stubPhoton(handler: (call: FetchCall) => Response | undefined): void {
     if (call.path.includes("/imessage/tokens")) {
       return Response.json(SHARED_TOKEN);
     }
+    // A shared project, which is what a cold send reads before registering
+    // the recipient as a user.
+    if (call.path.endsWith("/imessage/")) {
+      return Response.json({ succeed: true, data: { type: "shared" } });
+    }
     return Response.json({ succeed: true, data: {} });
   });
+}
+
+/** Control-plane calls a cold send makes, in order. */
+function cloudPaths(): string[] {
+  return calls.map((call) => new URL(call.path).pathname);
 }
 
 /**
@@ -404,6 +414,123 @@ describe("photon provider", () => {
         },
       },
     ]);
+  });
+
+  test("a cold send registers the recipient before resolving a chat", async () => {
+    // Photon will only message people the project knows. Skipping this fails
+    // at the message plane with "Target not allowed for this project", which
+    // reads like a bad address rather than a provisioning step nobody took.
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? {
+            chat: { guid: "any;-;+15551234567" },
+            initialMessage: photonMessage({ guid: "p2p-first" }),
+          }
+        : undefined,
+    );
+    stubPhoton(() => undefined);
+
+    await createPhotonProvider(plane.factory).send(
+      { to: "+15166681354" },
+      "hi",
+      { idempotencyKey: "k" },
+    );
+
+    expect(cloudPaths()).toEqual([
+      "/projects/test-key/imessage/",
+      "/projects/test-key/users/",
+      "/projects/test-key/imessage/tokens",
+    ]);
+    const registration = calls.find((c) => c.path.endsWith("/users/"));
+    expect(JSON.parse(String(registration?.init.body))).toEqual({
+      type: "shared",
+      phoneNumber: "+15166681354",
+    });
+  });
+
+  test("a reply to a known chat registers nobody", async () => {
+    // The recipient is already messageable, so a reply must not pay a
+    // registration round trip — nor consume a shared-user slot.
+    const plane = fakePlane(() => photonMessage({ guid: "p2p-out" }));
+    stubPhoton(() => undefined);
+
+    await createPhotonProvider(plane.factory).send(
+      { conversationId: "any;-;+15551234567" },
+      "hi",
+      { idempotencyKey: "k" },
+    );
+
+    expect(cloudPaths().some((p) => p.endsWith("/users/"))).toBe(false);
+  });
+
+  test("a dedicated project assigns the recipient to its own line", async () => {
+    // A dedicated user has to name a line the project owns. The token mint
+    // already reports those, so this costs no extra call.
+    stubPhoton((call) => {
+      if (call.path.endsWith("/imessage/")) {
+        return Response.json({ succeed: true, data: { type: "dedicated" } });
+      }
+      if (call.path.includes("/imessage/tokens")) {
+        return Response.json({
+          succeed: true,
+          data: {
+            type: "dedicated",
+            auth: { "inst-7": "tok_dedicated" },
+            numbers: { "inst-7": "+15550100" },
+            expiresIn: 600,
+          },
+        });
+      }
+      return undefined;
+    });
+    const plane = fakePlane((call) =>
+      call.kind === "createChat"
+        ? {
+            chat: { guid: "any;-;+15166681354" },
+            initialMessage: photonMessage({ guid: "p2p-first" }),
+          }
+        : undefined,
+    );
+
+    await createPhotonProvider(plane.factory).send(
+      { to: "+15166681354" },
+      "hi",
+      { idempotencyKey: "k" },
+    );
+
+    const registration = calls.find((c) => c.path.endsWith("/users/"));
+    expect(JSON.parse(String(registration?.init.body))).toEqual({
+      type: "dedicated",
+      phoneNumber: "+15166681354",
+      assignedPhoneNumber: "+15550100",
+    });
+  });
+
+  test("a dedicated project with no line says so rather than failing later", async () => {
+    stubPhoton((call) => {
+      if (call.path.endsWith("/imessage/")) {
+        return Response.json({ succeed: true, data: { type: "dedicated" } });
+      }
+      if (call.path.includes("/imessage/tokens")) {
+        return Response.json({
+          succeed: true,
+          data: {
+            type: "dedicated",
+            auth: { "inst-7": "tok_dedicated" },
+            expiresIn: 600,
+          },
+        });
+      }
+      return undefined;
+    });
+
+    await expect(
+      createPhotonProvider(fakePlane().factory).send(
+        { to: "+15166681354" },
+        "hi",
+        { idempotencyKey: "k" },
+      ),
+    ).rejects.toThrow(/no line to assign/);
   });
 
   test("a cold send to a bare handle resolves the chat in the same call", async () => {

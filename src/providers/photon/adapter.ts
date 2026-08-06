@@ -150,9 +150,19 @@ export function createPhotonProvider(
         return { id: message?.guid };
       }
 
-      // A handle with no chat resolved yet: create-or-resolve the chat and
-      // send the opening message in the same call rather than paying two round
-      // trips.
+      // A handle with no chat resolved yet. Two things have to happen before
+      // a chat exists, and they are easy to confuse: Photon will only message
+      // people the project knows, so the recipient is registered as a user
+      // first. Skipping it fails at the message plane with "Target not allowed
+      // for this project", which sounds like a bad address rather than a
+      // provisioning step nobody took.
+      //
+      // Registration is on the cold path only, and the guid cache below means
+      // that path runs once per handle — so this is not a call per message.
+      await client.ensureUser(addressed);
+
+      // Then create-or-resolve the chat, carrying the opening message rather
+      // than paying two round trips.
       const created = await client.createChat({
         addresses: [addressed],
         clientMessageId: sendOpts.idempotencyKey,

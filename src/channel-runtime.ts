@@ -25,6 +25,7 @@ import {
   setProvider,
   setSupervisor,
 } from "./plugin-state.ts";
+import { pluginDataDir, pluginName } from "./plugin-paths.ts";
 import { resolveProvider } from "./providers/index.ts";
 import type { MessagingProvider } from "./providers/types.ts";
 import { resolveWebhookEndpoint } from "./webhook-endpoint.ts";
@@ -36,14 +37,13 @@ import { PollWorkerSupervisor } from "./worker/supervisor.ts";
  * - `running` — ingress is up on the configured provider.
  * - `idle` — the provider was built here and could not come up; `idleReason`
  *   says why, and it is something the user can act on.
- * - `not-loaded` — this process has no plugin runtime to restart. The config
- *   write still happened and takes effect when the plugin next loads.
  *
- * `not-loaded` is kept apart from `idle` because nothing is wrong in that
- * case: the app can say "saved, applies on reload" rather than raising an
- * alarm about a channel nobody broke.
+ * There is deliberately no third state for "this caller has no runtime". A
+ * save arriving before `init` used to report one, which said the write applied
+ * on the next reload — true, and mostly read as an alarm about a channel
+ * nobody had broken. `derivedContext` removes the condition instead.
  */
-export type ChannelStatus = "running" | "idle" | "not-loaded";
+export type ChannelStatus = "running" | "idle";
 
 export interface StartRuntimeResult {
   status: ChannelStatus;
@@ -134,6 +134,35 @@ export function releaseProvider(): void {
 }
 
 /**
+ * A runtime context for a caller the `init` hook has not reached.
+ *
+ * `init` stashes the host's context, and until now anything running before it
+ * — a settings save arriving on a route while the hook has not run, or been
+ * torn down and not yet re-run — had nothing to build a channel with and
+ * reported `not-loaded`: the config write landed, the channel did not, and the
+ * app said so with a line about reloading that mostly read as an alarm.
+ *
+ * Nothing in that context actually had to come from the host. The plugin's own
+ * paths module resolves both fields from this file's location, and for an
+ * external plugin the storage directory it derives is the same `<plugin>/data`
+ * the host passes in — so a channel built on this one is the same channel,
+ * writing the same poll cursor. The logger is the one real loss, and a save
+ * that works silently beats a save that narrates why it did not.
+ */
+function derivedContext(): RuntimeContext {
+  return {
+    logger: {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    },
+    pluginStorageDir: pluginDataDir(),
+    pluginName: pluginName(),
+  };
+}
+
+/**
  * Build the provider for `config` and start its ingress.
  *
  * Never throws: a provider that cannot be built, or an ingress mode the
@@ -143,10 +172,7 @@ export function releaseProvider(): void {
 export function startChannelRuntime(
   config: IMessageConfig,
 ): StartRuntimeResult {
-  const ctx = getInitContext();
-  if (!ctx) {
-    return { status: "not-loaded" };
-  }
+  const ctx = getInitContext() ?? derivedContext();
 
   stopIngress();
   setConfig(config);

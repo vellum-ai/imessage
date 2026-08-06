@@ -209,7 +209,7 @@ interface CredentialField {
 type Credentials = Record<string, CredentialField[]>;
 
 /** What `startChannelRuntime` did, as the routes report it. */
-type ChannelStatus = "running" | "idle" | "not-loaded";
+type ChannelStatus = "running" | "idle";
 
 interface Settings {
   config: { provider: string; ingressMode: IngressMode };
@@ -242,10 +242,11 @@ function labelFor(provider: string): string {
 /**
  * Turn a channel result into something worth reading.
  *
- * `not-loaded` is the case that used to surface as "Channel is idle: plugin is
- * not initialized" — which sounded like a breakage when it only meant the
- * route could not reach a running channel in its own process. The write
- * happened; it applies on the next load. Say that.
+ * Two states, and only one of them is worth alarming about. A save used to be
+ * able to come back "it takes effect the next time the assistant loads this
+ * plugin", which was true and useless: the switch had already happened, and
+ * the sentence read as a warning about something the user then could not act
+ * on. The runtime no longer reports that state.
  */
 function noticeFor(result: ChannelResult, what: string): Notice {
   switch (result.status) {
@@ -257,11 +258,6 @@ function noticeFor(result: ChannelResult, what: string): Notice {
         text: `${what} The channel is not running: ${
           result.idleReason ?? "no reason given"
         }`,
-      };
-    case "not-loaded":
-      return {
-        tone: "info",
-        text: `${what} It takes effect the next time the assistant loads this plugin.`,
       };
     default:
       return { tone: "info", text: what };

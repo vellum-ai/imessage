@@ -113,11 +113,14 @@ where to get the credential. Same split the reference makes.
 - **`running`** — ingress is up.
 - **`idle`** — the provider was built here and could not come up. `idleReason`
   says why and the user can act on it.
-- **`not-loaded`** — this process has no plugin runtime to restart. The config
-  write still happened and applies on the next load.
 
-Keep `not-loaded` distinct from `idle`: an alarming banner for a state nobody
-caused and nobody can fix is worse than no banner.
+There is deliberately no third state for "this caller has no runtime". A save
+arriving before `init` used to report one, saying the write applied on the next
+reload — true, and read as an alarm about a channel nobody had broken.
+`derivedContext` removes the condition: everything `init` stashes is derivable
+from `plugin-paths.ts`, and for an external plugin the storage directory it
+derives is the same `<plugin>/data` the host passes in, so a channel built on
+it writes the same poll cursor.
 
 `startChannelRuntime` also clears the previous provider *before* building the
 new one, so a failed switch cannot leave the old provider sending under a config

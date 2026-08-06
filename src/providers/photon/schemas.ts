@@ -105,6 +105,25 @@ export type PhotonWebhook = z.infer<typeof PhotonWebhookSchema>;
 
 export const ListWebhooksResponseSchema = z.array(PhotonWebhookSchema);
 
+/**
+ * `POST /projects/{projectId}/users/`
+ *
+ * A Photon project may only message people it knows. A recipient who is not a
+ * user of the project is refused at the message plane with "Target not allowed
+ * for this project" — which is a policy answer, not a bad address, and reads
+ * identically to a transport failure if you are not expecting it.
+ *
+ * `assignedPhoneNumber` is the line *that user* reaches the project on. On a
+ * shared project the server allocates it per user out of a pool, which is the
+ * concrete reason a shared line cannot promise anyone a stable number.
+ */
+export const PhotonUserSchema = z.looseObject({
+  id: softString,
+  phoneNumber: softString,
+  assignedPhoneNumber: softString,
+});
+export type PhotonUser = z.infer<typeof PhotonUserSchema>;
+
 /* ------------------------------------------------------------------ *
  * Webhooks
  * ------------------------------------------------------------------ */

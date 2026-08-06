@@ -25,12 +25,14 @@ import {
   IMessageInfoSchema,
   ListWebhooksResponseSchema,
   PhotonWebhookSchema,
+  PhotonUserSchema,
   ProjectSchema,
   TokenResponseSchema,
 } from "./schemas.ts";
 import type {
   IMessageInfo,
   PhotonProject,
+  PhotonUser,
   PhotonWebhook,
   TokenResponse,
 } from "./schemas.ts";
@@ -105,6 +107,8 @@ interface CachedToken {
   token: string;
   /** Dedicated projects route by instance; shared projects have no instance. */
   instanceId?: string;
+  /** The instance's own line, which a dedicated user has to be assigned to. */
+  lineNumber?: string;
   expiresAt: number;
 }
 
@@ -162,6 +166,49 @@ export class PhotonClient {
       );
     }
     return parsed.data;
+  }
+
+  /**
+   * `POST /projects/{projectId}/users/` — make a handle messageable.
+   *
+   * A Photon project may only message people it knows. Photon's own word for
+   * one is a *user*, not an allowlist entry, and the distinction is load
+   * bearing: a shared project allocates each user their own line out of a
+   * pool, so creating one is a provisioning step rather than a permission
+   * flag. The message plane refuses anyone else with "Target not allowed for
+   * this project", which is a policy answer that reads exactly like a
+   * transport failure.
+   *
+   * Idempotent by Photon's own contract — a shared user is keyed on
+   * `phoneNumber` and re-creating an active one returns the same row — so this
+   * is safe on any path that might be the first send to a handle.
+   *
+   * Which shape depends on the project. A shared project lets the server
+   * allocate; a dedicated one has to name a line it owns, and the token mint
+   * already reports those (`numbers`), so this costs no extra call.
+   */
+  async ensureUser(phoneNumber: string): Promise<PhotonUser | undefined> {
+    const info = await this.getIMessageInfo();
+
+    let body: Record<string, unknown>;
+    if (info.type === "shared") {
+      body = { type: "shared", phoneNumber };
+    } else {
+      const assignedPhoneNumber = (await this.token()).lineNumber;
+      if (!assignedPhoneNumber) {
+        throw new PhotonApiError(
+          `Photon reported a dedicated project with no line to assign ${phoneNumber} to — add a line to the project first`,
+          0,
+        );
+      }
+      body = { type: "dedicated", phoneNumber, assignedPhoneNumber };
+    }
+
+    const data = await this.cloudRequest("/users/", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return PhotonUserSchema.safeParse(data).data;
   }
 
   /** `GET /projects/{projectId}/webhooks/`. */
@@ -329,6 +376,9 @@ export class PhotonClient {
     this.cachedToken = {
       token: first[1],
       instanceId: first[0],
+      ...(minted.numbers?.[first[0]]
+        ? { lineNumber: minted.numbers[first[0]] }
+        : {}),
       expiresAt,
     };
     return this.cachedToken;

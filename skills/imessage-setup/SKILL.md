@@ -138,6 +138,13 @@ list`, or open the settings app, which shows which fields are stored.
 stale secret against a current id fails the same way a wrong id does. Re-copy
 both from the dashboard rather than guessing which one drifted.
 
+**Photon: "Target not allowed for this project"** — a Photon project may only
+message people it knows, and the recipient is not one of them yet. The plugin
+registers a recipient automatically on the first send to a new number, so
+seeing this means the registration itself failed. On a shared project the usual
+cause is the project's shared-user cap; Photon's own message says which. There
+is nothing to fix on the plugin side.
+
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.
 

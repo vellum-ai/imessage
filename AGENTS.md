@@ -300,6 +300,22 @@ arrive inside a 200**, so the envelope is checked, not just the status.
 - `POST /projects/{projectId}/webhooks/` — `{ webhookUrl }`. The `signingSecret`
   comes back **once** and is never retrievable; a lost one means delete and
   re-register.
+- `POST /projects/{projectId}/users/` — **a project may only message people it
+  knows.** Anyone else is refused at the message plane with "Target not allowed
+  for this project", which is a policy answer that reads exactly like a bad
+  address. `{ type: "shared", phoneNumber }` lets the server allocate a line
+  out of its pool (capped by `maxSharedUsers`); `{ type: "dedicated",
+  phoneNumber, assignedPhoneNumber }` names a line the project owns, which the
+  token mint already reports in `numbers`. Idempotent — shared users key on
+  `phoneNumber`, dedicated on the `(phoneNumber, assignedPhoneNumber)` tuple —
+  so calling it on a cold send is safe. `GET /users/` lists (with `search`,
+  `type`, pagination), `DELETE /users/{userId}/` soft-deletes.
+
+Photon's word for a permitted recipient is a **user**, not an allowlist entry,
+and the distinction is load bearing: a shared project allocates each user their
+own `assignedPhoneNumber`, so registering one is provisioning rather than
+flipping a permission. That is also the concrete reason a shared line cannot
+promise anyone a stable number.
 
 Message plane `imessage.spectrum.photon.codes:443`, **gRPC**, bearer metadata
 carrying the minted token. Reached through the SDK, not by hand:

@@ -71,7 +71,7 @@ async function registerWebhook(
 
   try {
     const held = await readSecret(secretField);
-    const endpoint = resolveWebhookEndpoint(provider.id);
+    const endpoint = await resolveWebhookEndpoint(provider.id);
     if (!endpoint.ok) {
       logger.warn(
         { provider: provider.id, reason: endpoint.reason },

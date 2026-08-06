@@ -288,6 +288,22 @@ degrades rather than drops a message, and accept several plausible spellings.
 `unknownMessageKeys()` logs wire keys the schema does not model, so one real
 payload corrects the guesses.
 
+## Where a provider is told to deliver
+
+`resolveWebhookEndpoint` asks the **host** for the URL, via
+`resolvePluginWebhookUrl` in `@vellumai/plugin-api`. Do not compose one from
+`ingress.publicBaseUrl`, which is what this plugin used to do: on a
+platform-connected assistant that value holds the **Velay tunnel URL**, so the
+vendor webhook registered cleanly and every delivery went somewhere the gateway
+was not serving. The correct order is platform pods first, then a configured
+public ingress, then a managed callback route — the same order `webhooks
+register` uses, which is exactly why it belongs to the host rather than to a
+copy here.
+
+The config fallback is still in the file for a host that predates that export.
+It carries the old flaw, so treat it as a compatibility shim, not a second
+supported path.
+
 ## Photon API facts worth not re-deriving
 
 Control plane `https://spectrum.photon.codes`, `Authorization: Basic

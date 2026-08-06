@@ -15,7 +15,7 @@
  * did, and the symptom was a registration nobody could fault and inbound that
  * never arrived.
  *
- * `resolvePluginWebhookUrl` in `@vellumai/plugin-api` answers it properly —
+ * `resolveWebhookUrl` in `@vellumai/plugin-api` answers it properly —
  * platform pods first, then a configured public ingress, then a managed
  * callback route for a platform-connected assistant — and registers the
  * callback route on the managed branches. It is the same order `webhooks
@@ -67,7 +67,7 @@ export type WebhookUrlResolver = (opts: {
 
 function hostResolver(): WebhookUrlResolver | undefined {
   const candidate = (pluginApi as Record<string, unknown>)
-    .resolvePluginWebhookUrl;
+    .resolveWebhookUrl;
   return typeof candidate === "function"
     ? (candidate as WebhookUrlResolver)
     : undefined;

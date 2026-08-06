@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { handleSettingsGet } from "../app-routes.ts";
+import { resetPluginState, setWebhookReport } from "../plugin-state.ts";
 import { INGRESS_MODES } from "../config.ts";
 import { PROVIDER_IDS } from "../providers/types.ts";
 
@@ -21,6 +22,7 @@ interface SettingsPayload {
   ingressModes: string[];
   activeProvider: string | null;
   credentials: Record<string, { field: string; set: boolean }[]>;
+  webhook: { provider: string; outcome: string; reason?: string } | null;
 }
 
 async function settingsPayload(): Promise<SettingsPayload> {
@@ -57,6 +59,28 @@ describe("handleSettingsGet", () => {
         expect(field).not.toHaveProperty("value");
       }
     }
+  });
+
+  test("reports the last webhook registration attempt", async () => {
+    // Registration runs un-awaited and reported itself only through the
+    // logger, so "no webhook exists and nothing says why" was reachable and
+    // was reached. This is the answer without the daemon's log.
+    setWebhookReport({
+      provider: "comms",
+      outcome: "failed",
+      reason: "403 — scope comms_webhooks missing",
+      at: "2026-08-06T12:00:00.000Z",
+    });
+
+    const payload = await settingsPayload();
+    expect(payload.webhook?.outcome).toBe("failed");
+    expect(payload.webhook?.reason).toContain("comms_webhooks");
+  });
+
+  test("says so when nothing has attempted a registration", async () => {
+    resetPluginState();
+    const payload = await settingsPayload();
+    expect(payload.webhook).toBeNull();
   });
 
   test("no longer advertises a list of editable keys", async () => {

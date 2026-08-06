@@ -23,6 +23,7 @@ import { IMessageConfigSchema, resolveConfig } from "../config.ts";
 import {
   getChannel,
   getProvider,
+  getWebhookReport,
   resetPluginState,
   setInitContext,
 } from "../plugin-state.ts";
@@ -166,5 +167,54 @@ describe("stopIngress", () => {
     );
     stopIngress();
     expect(getProvider()?.id).toBe("photon");
+  });
+});
+
+describe("webhook registration reporting", () => {
+  /**
+   * Registration runs un-awaited and used to report itself only through the
+   * logger. That made "no webhook exists and nothing says why" reachable, and
+   * it was reached in QA. These pin the record that replaces the log.
+   */
+  async function settle(): Promise<void> {
+    // Registration is deliberately not awaited by `startChannelRuntime`, so
+    // let its microtasks drain before reading what it recorded.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  test("records why nothing was registered", async () => {
+    // No credentials in this environment, so the attempt fails on the way to
+    // the provider. What matters is that a reason exists at all.
+    withContext();
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
+    );
+    await settle();
+
+    const report = getWebhookReport();
+    expect(report?.provider).toBe("comms");
+    expect(["failed", "skipped"]).toContain(report?.outcome ?? "");
+    expect(report?.reason?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  test("attempts nothing in poll mode", async () => {
+    withContext();
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "poll" }),
+    );
+    await settle();
+
+    expect(getWebhookReport()).toBeUndefined();
+  });
+
+  test("still records when no init context was ever set", async () => {
+    // The path that produced the silence: a derived context used to carry a
+    // no-op logger, so a failure here went nowhere at all.
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
+    );
+    await settle();
+
+    expect(getWebhookReport()).toBeDefined();
   });
 });

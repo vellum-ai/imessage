@@ -32,12 +32,34 @@ export interface RuntimeContext {
   pluginName: string;
 }
 
+/**
+ * What happened the last time this process tried to register a webhook.
+ *
+ * Kept because registration runs un-awaited on a start and reported itself
+ * only through the logger, which leaves "no webhook exists and nothing says
+ * why" as a reachable state — and it was reached. The settings route reports
+ * this, so the answer survives a logger that is not being captured.
+ *
+ * In memory on purpose: it describes this process's attempt, and a stale
+ * record read from disk after a restart would be worse than none.
+ */
+export interface WebhookRegistrationReport {
+  provider: string;
+  outcome: "registered" | "already-registered" | "skipped" | "failed";
+  /** Where the provider was pointed, when one was resolved. */
+  url?: string;
+  /** Why it was skipped or how it failed. */
+  reason?: string;
+  at: string;
+}
+
 interface PluginState {
   ctx?: RuntimeContext;
   config?: IMessageConfig;
   provider?: MessagingProvider;
   channel?: PluginChannelProvider;
   supervisor?: PollWorkerSupervisor;
+  webhook?: WebhookRegistrationReport;
 }
 
 const state: PluginState = {};
@@ -84,6 +106,14 @@ export function getSupervisor(): PollWorkerSupervisor | undefined {
   return state.supervisor;
 }
 
+export function setWebhookReport(report: WebhookRegistrationReport): void {
+  state.webhook = report;
+}
+
+export function getWebhookReport(): WebhookRegistrationReport | undefined {
+  return state.webhook;
+}
+
 /** Clear everything. Used by `shutdown` and by tests. */
 export function resetPluginState(): void {
   state.ctx = undefined;
@@ -91,4 +121,5 @@ export function resetPluginState(): void {
   state.provider = undefined;
   state.channel = undefined;
   state.supervisor = undefined;
+  state.webhook = undefined;
 }

@@ -57,11 +57,30 @@ export interface ListRecentInput {
   isFromMe?: boolean;
 }
 
+/** What Photon knows about an address, and how it can be reached. */
+export interface AddressReport {
+  address: string;
+  country: string | null;
+  /** `iMessage`, `SMS`, `RCS`, `unknown` — whatever the server reports. */
+  services: readonly string[];
+}
+
 /** What this plugin asks of the message plane. */
 export interface MessageClient {
   sendText(input: SendTextInput): Promise<PhotonMessage>;
   createChat(input: CreateChatInput): Promise<PhotonChatResult>;
   listRecent(input: ListRecentInput): Promise<MessageListPage>;
+  /**
+   * What Photon makes of an address.
+   *
+   * Diagnostic only — nothing sends through it. It exists because Photon
+   * refuses a recipient with "Target not allowed for this project", a sentence
+   * that is equally consistent with a missing user record, a handle Photon
+   * cannot reach over iMessage, and a bug on their side. Asking Photon
+   * directly is what separates those three, and every round of guessing at it
+   * from the outside has cost more than the call does.
+   */
+  describeAddress(address: string): Promise<AddressReport>;
   /** Release the gRPC channel. Called on provider shutdown. */
   close(): Promise<void>;
 }
@@ -118,6 +137,15 @@ export const createMessageClient: MessageClientFactory = (opts) => {
         ...(input.after ? { after: input.after } : {}),
         ...(input.isFromMe === undefined ? {} : { isFromMe: input.isFromMe }),
       }),
+
+    async describeAddress(address) {
+      const info = await im.addresses.get(address);
+      return {
+        address: info.address,
+        country: info.country,
+        services: info.services,
+      };
+    },
 
     close: () => im.close(),
   };

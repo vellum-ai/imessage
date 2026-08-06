@@ -267,7 +267,7 @@ function photonMessage(
 
 /** What the fake message plane was asked to do. */
 interface PlaneCall {
-  kind: "sendText" | "createChat" | "listRecent";
+  kind: "sendText" | "createChat" | "listRecent" | "describeAddress";
   input: Record<string, unknown>;
 }
 
@@ -280,6 +280,7 @@ interface PlaneCall {
  */
 function fakePlane(
   handler: (call: PlaneCall) => unknown = () => undefined,
+  addressReport?: { address: string; country: string | null; services: string[] },
 ): { factory: MessageClientFactory; calls: PlaneCall[]; closed: () => number } {
   const planeCalls: PlaneCall[] = [];
   let closes = 0;
@@ -304,6 +305,11 @@ function fakePlane(
     async listRecent(input) {
       await opts.token();
       return (record("listRecent", input) as MessageListPage) ?? { messages: [] };
+    },
+    async describeAddress(address) {
+      await opts.token();
+      record("describeAddress", { address });
+      return addressReport ?? { address, country: "US", services: ["iMessage"] };
     },
     async close() {
       closes++;
@@ -446,6 +452,66 @@ describe("photon provider", () => {
       type: "shared",
       phoneNumber: "+15166681354",
     });
+  });
+
+  test("a refusal carries Photon's own verdict on the address", async () => {
+    // "Target not allowed for this project" is equally consistent with a
+    // missing user record, an unreachable handle, and a Photon-side bug. The
+    // user record was just written, so the report has to say which.
+    const plane = fakePlane(
+      (call) => {
+        if (call.kind === "createChat") {
+          throw new Error("Target not allowed for this project");
+        }
+        return undefined;
+      },
+      { address: "+15166681354", country: "US", services: ["SMS"] },
+    );
+    stubPhoton(() => undefined);
+
+    const send = createPhotonProvider(plane.factory).send(
+      { to: "+15166681354" },
+      "hi",
+      { idempotencyKey: "k" },
+    );
+
+    await expect(send).rejects.toThrow(/Target not allowed for this project/);
+    await expect(send).rejects.toThrow(/services: SMS/);
+    expect(plane.calls.map((c) => c.kind)).toContain("describeAddress");
+  });
+
+  test("a probe that fails does not swallow the refusal", async () => {
+    const plane = fakePlane((call) => {
+      if (call.kind === "createChat") {
+        throw new Error("Target not allowed for this project");
+      }
+      if (call.kind === "describeAddress") throw new Error("plane unavailable");
+      return undefined;
+    });
+    stubPhoton(() => undefined);
+
+    await expect(
+      createPhotonProvider(plane.factory).send({ to: "+15166681354" }, "hi", {
+        idempotencyKey: "k",
+      }),
+    ).rejects.toThrow(/Target not allowed[\s\S]*plane unavailable/);
+  });
+
+  test("an ordinary send failure is not probed", async () => {
+    // The diagnostic is for one specific refusal. Firing it on every failure
+    // would add a round trip to paths that already say what went wrong.
+    const plane = fakePlane((call) => {
+      if (call.kind === "createChat") throw new Error("UNAVAILABLE: no route");
+      return undefined;
+    });
+    stubPhoton(() => undefined);
+
+    await expect(
+      createPhotonProvider(plane.factory).send({ to: "+15166681354" }, "hi", {
+        idempotencyKey: "k",
+      }),
+    ).rejects.toThrow("UNAVAILABLE: no route");
+    expect(plane.calls.map((c) => c.kind)).not.toContain("describeAddress");
   });
 
   test("a reply to a known chat registers nobody", async () => {
@@ -626,6 +692,8 @@ describe("photon provider", () => {
       },
       createChat: () => Promise.resolve({ chat: {} } as never),
       listRecent: () => Promise.resolve({ messages: [] }),
+      describeAddress: (address: string) =>
+        Promise.resolve({ address, country: null, services: [] }),
       close: () => Promise.resolve(),
     });
 

@@ -106,6 +106,8 @@ function stubPlane(
         return { guid: `p2p-${sends + 1}` } as never;
       },
       listRecent: () => Promise.resolve({ messages: [] }),
+      describeAddress: (address: string) =>
+        Promise.resolve({ address, country: null, services: ["iMessage"] }),
       close: () => Promise.resolve(),
     }),
   };

@@ -39,6 +39,7 @@ import type {
 import { resolveCredentialField } from "../../config.ts";
 import { describeApiFailure } from "../error-detail.ts";
 import type {
+  AddressReport,
   CreateChatInput,
   ListRecentInput,
   MessageClient,
@@ -280,6 +281,11 @@ export class PhotonClient {
   /** Recent messages on the line, newest-first, bounded by `after`. */
   async listRecent(input: ListRecentInput): Promise<MessageListPage> {
     return this.plane().listRecent(input);
+  }
+
+  /** What Photon makes of an address. Diagnostic only — see the seam. */
+  async describeAddress(address: string): Promise<AddressReport> {
+    return this.plane().describeAddress(address);
   }
 
   /**

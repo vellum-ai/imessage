@@ -72,14 +72,16 @@ function withContext(): void {
 }
 
 describe("startChannelRuntime", () => {
-  test("with no plugin loaded it says so instead of claiming idle", () => {
-    // The case a user hit by clicking a provider: the config write lands, but
-    // there is no running channel in this process to restart. Reporting that
-    // as idle read as "your channel just broke" — it had not.
+  test("a save before init still brings the channel up", () => {
+    // No `setInitContext` here: this is a settings save arriving on a route
+    // while the hook has not run. It used to report a third status saying the
+    // write applied on the next reload — true, and read as an alarm. The
+    // runtime derives what it needs from its own location instead.
     const result = startChannelRuntime(IMessageConfigSchema.parse({}));
 
-    expect(result.status).toBe("not-loaded");
+    expect(result.status).toBe("running");
     expect(result.idleReason).toBeUndefined();
+    expect(getProvider()?.id).toBe("photon");
   });
 
   test("an unreadable provider value falls back rather than breaking", () => {

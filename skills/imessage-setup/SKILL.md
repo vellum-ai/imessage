@@ -107,16 +107,18 @@ Polling needs `comms_read` on Comms, runs in its own worker process, and starts
 from the moment it is enabled rather than replaying the line's history. It
 costs latency and burns requests while the line is quiet.
 
-Webhooks would be preferable and the plugin already registers them — on every
-webhook-mode start it points the provider at its own route,
-`<ingress.publicBaseUrl>/webhooks/plugins/imessage/events-<provider>`, which
-needs `assistant config get ingress.publicBaseUrl` to be set and a guardian to
-have approved the plugin's ingress declaration. **But the gateway refuses those
-deliveries** until it implements the verification descriptors the plugin
-declares: today it checks a `Vellum-Signature` header neither vendor can send,
-so every delivery is a 403 before the plugin sees it. Do not spend a setup
-session debugging that — `channels/ingress.json` declares how each route should be
-verified, and the gateway does not read those descriptors yet.
+Webhooks are preferable and the plugin registers them on every webhook-mode
+start, pointing the provider at its own route,
+`/webhooks/plugins/imessage/events-<provider>`. The public base comes from the
+host — a managed platform callback route, or a configured public ingress — so
+there is nothing to compose or configure here.
+
+Two things still have to be true for a delivery to land: a guardian must have
+approved the plugin's ingress declaration, and the gateway must be new enough
+to read the verification descriptors in `channels/ingress.json`. A gateway that
+predates them checks a `Vellum-Signature` header neither vendor can send, so
+every delivery is a 403 before the plugin sees it. If inbound is silent in
+webhook mode, check those two before anything else.
 
 ## Configuration
 

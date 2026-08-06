@@ -31,6 +31,63 @@ function isChatGuid(value: string): boolean {
   return value.includes(";");
 }
 
+/**
+ * Photon's refusal to message someone, as distinct from a transport failure.
+ *
+ * Matched on the sentence because the plane reports it as an ordinary error
+ * rather than a distinguishable code. Loose on purpose: a near-miss costs one
+ * diagnostic call, while missing it costs another round of guessing.
+ */
+function isTargetRefusal(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /target .*not allowed|not allowed for this project/i.test(message);
+}
+
+/**
+ * Re-throw a refusal with what Photon itself knows about the address.
+ *
+ * "Target not allowed for this project" is equally consistent with three very
+ * different causes: the user record is missing, the handle is not reachable
+ * over iMessage at all, or something is wrong on Photon's side. Every attempt
+ * to tell them apart from the outside has produced a new theory and no
+ * evidence, so this asks Photon directly and puts the answer in the error.
+ *
+ * `services` is the load-bearing part. An address Photon reports as reachable
+ * over iMessage, refused anyway, is a Photon-side problem and the report says
+ * so. An address it reports no iMessage service for was never deliverable on
+ * an iMessage line, whatever the user record says.
+ */
+async function explainRefusal(
+  client: PhotonClient,
+  address: string,
+  err: unknown,
+): Promise<never> {
+  const reason = err instanceof Error ? err.message : String(err);
+  try {
+    const report = await client.describeAddress(address);
+    const services = report.services.length
+      ? report.services.join(", ")
+      : "none";
+    throw new Error(
+      `Photon refused ${address}: ${reason}. Photon reports that address as ` +
+        `${report.address} (country ${report.country ?? "unknown"}) with ` +
+        `services: ${services}. A project user exists for it, so if iMessage ` +
+        `is listed here the refusal is Photon-side; if it is not, the handle ` +
+        `is not reachable on an iMessage line.`,
+    );
+  } catch (probeErr) {
+    // The probe is best-effort. Losing the original refusal to a failure in
+    // the thing meant to explain it would be the worst outcome of all.
+    if (probeErr instanceof Error && probeErr.message.startsWith("Photon refused")) {
+      throw probeErr;
+    }
+    throw new Error(
+      `Photon refused ${address}: ${reason}. Asking Photon about that ` +
+        `address also failed (${probeErr instanceof Error ? probeErr.message : String(probeErr)}).`,
+    );
+  }
+}
+
 export function createPhotonProvider(
   /** Injected by tests so a send never opens a real gRPC channel. */
   makeMessageClient?: MessageClientFactory,
@@ -163,11 +220,20 @@ export function createPhotonProvider(
 
       // Then create-or-resolve the chat, carrying the opening message rather
       // than paying two round trips.
-      const created = await client.createChat({
-        addresses: [addressed],
-        clientMessageId: sendOpts.idempotencyKey,
-        text: body,
-      });
+      let created;
+      try {
+        created = await client.createChat({
+          addresses: [addressed],
+          clientMessageId: sendOpts.idempotencyKey,
+          text: body,
+        });
+      } catch (err) {
+        // The user record was just written, so a refusal here is not the
+        // missing registration it sounds like. Ask Photon what it makes of
+        // the address and say that instead of guessing.
+        if (isTargetRefusal(err)) await explainRefusal(client, addressed, err);
+        throw err;
+      }
       if (created.chatGuid) chatGuids.set(addressed, created.chatGuid);
 
       if (created.message) return { id: created.message.guid };

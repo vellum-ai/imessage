@@ -211,6 +211,15 @@ type Credentials = Record<string, CredentialField[]>;
 /** What `startChannelRuntime` did, as the routes report it. */
 type ChannelStatus = "running" | "idle";
 
+/** What the plugin's last webhook registration attempt did, if any. */
+interface WebhookReport {
+  provider: string;
+  outcome: "registered" | "already-registered" | "skipped" | "failed";
+  url?: string;
+  reason?: string;
+  at: string;
+}
+
 interface Settings {
   config: { provider: string; ingressMode: IngressMode };
   providers: string[];
@@ -218,6 +227,7 @@ interface Settings {
   activeProvider: string | null;
   /** Every provider's fields, keyed by provider id. */
   credentials: Credentials;
+  webhook: WebhookReport | null;
 }
 
 interface ChannelResult {
@@ -261,6 +271,36 @@ function noticeFor(result: ChannelResult, what: string): Notice {
       };
     default:
       return { tone: "info", text: what };
+  }
+}
+
+/**
+ * One line about the last registration attempt, or nothing.
+ *
+ * Only shown in webhook mode, where it is the difference between "inbound is
+ * set up" and "inbound is silent and you cannot see why". A failure or a skip
+ * carries the provider's own reason, since that is what says whether the fix
+ * is a credential, a public URL, or nothing you control.
+ */
+function describeWebhook(
+  report: WebhookReport | null,
+  ingressMode: IngressMode | null,
+): string | null {
+  if (ingressMode !== "webhook") return null;
+  if (!report) {
+    return "No webhook registration has been attempted since this plugin loaded.";
+  }
+  switch (report.outcome) {
+    case "registered":
+      return `Registered with ${report.provider} at ${report.url}.`;
+    case "already-registered":
+      return `Already registered with ${report.provider} at ${report.url}.`;
+    case "skipped":
+      return `Not registered: ${report.reason ?? "no reason given"}`;
+    case "failed":
+      return `Registration failed: ${report.reason ?? "no reason given"}`;
+    default:
+      return null;
   }
 }
 
@@ -458,6 +498,7 @@ function App(): React.ReactElement {
   const hasChanges =
     draftProvider !== serverProvider || draftIngress !== serverIngress || typed;
   const ingress = ingressOptions.find((mode) => mode.id === draftIngress);
+  const webhookNote = describeWebhook(settings.webhook, serverIngress);
 
   return (
     <div className="app">
@@ -556,6 +597,7 @@ function App(): React.ReactElement {
               ))}
             </select>
             {ingress ? <p className="note">{ingress.note}</p> : null}
+            {webhookNote ? <p className="note">{webhookNote}</p> : null}
           </div>
 
           <div className="actions">

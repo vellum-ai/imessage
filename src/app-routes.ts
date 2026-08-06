@@ -21,7 +21,7 @@ import {
 } from "./app-settings.ts";
 import { startChannelRuntime } from "./channel-runtime.ts";
 import { INGRESS_MODES } from "./config.ts";
-import { getProvider } from "./plugin-state.ts";
+import { getProvider, getWebhookReport } from "./plugin-state.ts";
 import { pluginConfigPath } from "./plugin-paths.ts";
 import { PROVIDER_IDS } from "./providers/types.ts";
 
@@ -64,6 +64,11 @@ export async function handleSettingsGet(): Promise<Response> {
     ingressModes: INGRESS_MODES,
     activeProvider: getProvider()?.id ?? null,
     credentials: await readCredentialStatus(),
+    // What the last registration attempt in this process did. Registration
+    // runs un-awaited and used to report itself only through the logger, so
+    // "no webhook exists and nothing says why" was reachable. This is the
+    // answer without needing the daemon's log.
+    webhook: getWebhookReport() ?? null,
   });
 }
 

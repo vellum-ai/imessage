@@ -22,13 +22,17 @@ import {
   getSupervisor,
   setChannel,
   setConfig,
+  setWebhookReport,
   setProvider,
   setSupervisor,
 } from "./plugin-state.ts";
 import { pluginDataDir, pluginName } from "./plugin-paths.ts";
 import { resolveProvider } from "./providers/index.ts";
 import type { MessagingProvider } from "./providers/types.ts";
-import { resolveWebhookEndpoint } from "./webhook-endpoint.ts";
+import {
+  ingressRoutePath,
+  resolveWebhookEndpoint,
+} from "./webhook-endpoint.ts";
 import { PollWorkerSupervisor } from "./worker/supervisor.ts";
 
 /**
@@ -68,14 +72,21 @@ async function registerWebhook(
   logger: RuntimeContext["logger"],
 ): Promise<void> {
   const secretField = WEBHOOK_SECRET_FIELDS[provider.id];
+  const at = new Date().toISOString();
 
   try {
     const held = await readSecret(secretField);
     const endpoint = await resolveWebhookEndpoint(provider.id);
     if (!endpoint.ok) {
+      setWebhookReport({
+        provider: provider.id,
+        outcome: "skipped",
+        reason: endpoint.reason,
+        at,
+      });
       logger.warn(
         { provider: provider.id, reason: endpoint.reason },
-        "imessage: no webhook could be registered — inbound will not arrive until ingress.publicBaseUrl is set or ingressMode is 'poll'",
+        "imessage: no webhook could be registered — inbound will not arrive until the assistant has a public URL or ingressMode is 'poll'",
       );
       return;
     }
@@ -93,8 +104,14 @@ async function registerWebhook(
       await storeSecret(secretField, result.secret);
     }
 
+    setWebhookReport({
+      provider: provider.id,
+      outcome: result.created ? "registered" : "already-registered",
+      url: endpoint.url,
+      at,
+    });
     logger.info(
-      { provider: provider.id, created: result.created },
+      { provider: provider.id, created: result.created, url: endpoint.url },
       result.created
         ? "imessage: registered the inbound webhook with the provider"
         : "imessage: provider webhook already registered",
@@ -103,6 +120,13 @@ async function registerWebhook(
     // Everything is inside the boundary, minting and storing included: this
     // runs un-awaited, so anything escaping is an unhandled rejection rather
     // than a channel that reports what went wrong.
+    const reason = err instanceof Error ? err.message : String(err);
+    setWebhookReport({
+      provider: provider.id,
+      outcome: "failed",
+      reason,
+      at,
+    });
     logger.warn(
       { err, provider: provider.id },
       "imessage: could not register the inbound webhook — the channel is running but will not hear anything",
@@ -146,16 +170,27 @@ export function releaseProvider(): void {
  * paths module resolves both fields from this file's location, and for an
  * external plugin the storage directory it derives is the same `<plugin>/data`
  * the host passes in — so a channel built on this one is the same channel,
- * writing the same poll cursor. The logger is the one real loss, and a save
- * that works silently beats a save that narrates why it did not.
+ * writing the same poll cursor.
+ *
+ * The logger falls back to the console rather than to no-ops. Discarding it
+ * was a mistake worth naming: webhook registration reports what it did through
+ * this logger and nothing else, so a channel started without a host context
+ * would fail to register and say nothing anywhere. "Nothing was registered and
+ * there is no reason recorded" is the hardest state to debug there is, and it
+ * costs a line of output to avoid.
  */
 function derivedContext(): RuntimeContext {
+  const write =
+    (level: "debug" | "info" | "warn" | "error") =>
+    (obj: object, msg: string) => {
+      console[level === "debug" ? "log" : level](msg, obj);
+    };
   return {
     logger: {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
+      debug: write("debug"),
+      info: write("info"),
+      warn: write("warn"),
+      error: write("error"),
     },
     pluginStorageDir: pluginDataDir(),
     pluginName: pluginName(),
@@ -202,7 +237,7 @@ export function startChannelRuntime(
   if (config.ingressMode === "webhook") {
     ctx.logger.info(
       { provider: provider.id },
-      `imessage: webhook ingress — inbound arrives at /webhooks/plugins/${ctx.pluginName}/events`,
+      `imessage: webhook ingress — inbound arrives at /webhooks/plugins/${ctx.pluginName}/${ingressRoutePath(provider.id)}`,
     );
     // Deliberately not awaited: registration is a network round trip to the
     // provider, and neither plugin boot nor a settings save should block on

@@ -122,6 +122,21 @@ describe("with a host that resolves plugin webhook URLs", () => {
     expect(seen).toEqual([{ plugin: CHANNEL_ID, path: "events-photon" }]);
   });
 
+  test("trims a trailing slash off the host's answer", async () => {
+    // The platform's callback registration appends one, and a provider
+    // delivers to the URL it was given verbatim. The gateway matches the
+    // declared `events-comms`, so a registration carrying the slash 404s.
+    const endpoint = await resolveWebhookEndpoint(
+      "comms",
+      async (opts) =>
+        `https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/${opts.path}/`,
+    );
+
+    expect(endpoint.ok && endpoint.url).toBe(
+      "https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/events-comms",
+    );
+  });
+
   test("reports the host's reason rather than falling back to config", async () => {
     // No ingress and no platform connection means there is no URL that works.
     // Quietly composing one from config would put back the bug this replaces.

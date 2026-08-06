@@ -118,6 +118,20 @@ function endpointFromConfig(provider: ProviderId): WebhookEndpoint {
 }
 
 /**
+ * Drop a trailing slash the host may have handed back.
+ *
+ * The platform's callback registration appends one, and a provider delivers to
+ * the URL it was given verbatim — `events-comms/`, which the gateway matches
+ * against the declared `events-comms`. Newer hosts trim it themselves; this
+ * keeps a registration correct against one that does not, since the URL is
+ * stored on the provider's side and outlives the host version that produced it.
+ */
+function withoutTrailingSlash(url: string): string {
+  if (url.includes("?") || url.includes("#")) return url;
+  return url.replace(/\/+$/, "");
+}
+
+/**
  * The absolute URL a provider posts deliveries to, or why there is not one.
  *
  * `resolver` is a test seam. The real one comes off the plugin-api namespace,
@@ -138,7 +152,7 @@ export async function resolveWebhookEndpoint(
       path: ingressRoutePath(provider),
       sourceIdentifier: `iMessage (${provider})`,
     });
-    return { ok: true, url };
+    return { ok: true, url: withoutTrailingSlash(url) };
   } catch (err) {
     // No ingress and no platform connection is a real answer, not a failure
     // to handle: there is no URL that would work, and registering a plausible

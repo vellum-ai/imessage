@@ -69,14 +69,17 @@ describe("handleProviderWebhook", () => {
     });
   });
 
-  test("keeps the vendor's payload out of the reply", async () => {
-    // `raw` is in the event contract so a normalizer can hand the payload to a
-    // later stage. The gateway discards it, so sending it back would put the
-    // whole delivery on the wire again for nobody.
+  test("carries the vendor payload forward on the reply", async () => {
+    // The gateway understands only the fields the manifest declares, so
+    // anything the vendor sent beyond them survives on `raw` or nowhere.
     setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
     const response = await handleProviderWebhook("comms", post(commsDelivery()));
 
-    expect(await bodyOf(response)).not.toHaveProperty("raw");
+    // The unwrapped message, which is what `normalizeCommsMessage` is handed —
+    // the envelope is the transport, the message is the payload.
+    expect(await bodyOf(response)).toMatchObject({
+      raw: { id: "msg_01", channel: "imessage", direction: "inbound" },
+    });
   });
 
   test("ignores a delivery on a provider that is not configured", async () => {

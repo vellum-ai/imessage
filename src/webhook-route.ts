@@ -82,9 +82,10 @@ export async function handleProviderWebhook(
   // conversation. Nothing here posts a message; a plugin that could would be
   // going around all three.
   //
-  // `raw` is dropped. It is part of the event contract so a normalizer can
-  // hand the vendor payload to a later stage, the gateway discards it, and
-  // sending it would put the whole delivery back on the wire for nobody.
-  const { raw: _raw, ...delivered } = event;
-  return json(200, delivered);
+  // Sent whole, `raw` included. The gateway understands only the fields the
+  // manifest declares, so anything Comms or Photon sent beyond them survives
+  // there or nowhere — and the vendor's payload is the thing a later stage
+  // would have to re-read to answer a question this normalizer did not
+  // anticipate.
+  return json(200, event);
 }

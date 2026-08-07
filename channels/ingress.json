@@ -32,6 +32,9 @@
           "format": "unix-seconds",
           "toleranceSeconds": 300
         }
+      },
+      "inbound": {
+        "identity": "phone"
       }
     },
     {
@@ -52,6 +55,9 @@
         "payload": [
           "body"
         ]
+      },
+      "inbound": {
+        "identity": "phone"
       }
     }
   ]

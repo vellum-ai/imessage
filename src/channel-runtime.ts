@@ -261,10 +261,16 @@ export function startChannelRuntime(
     },
     logger: ctx.logger,
     sink: (event) => {
-      // TODO(pluggable-channels): hand the event to the host's inbound
-      // pipeline so it runs through the kill switch, trust classification, and
-      // the admission floor. Posting straight into a conversation would bypass
-      // all three, which is exactly the gap this channel must not open.
+      // Still nowhere to hand this. Webhook mode reaches the host's inbound
+      // pipeline by *answering* a delivery the gateway forwarded — see
+      // `webhook-route.ts` and the `inbound` declaration in
+      // `channels/ingress.json` — and a polled message is not a reply to
+      // anything, so it has no such opening. Posting it straight into a
+      // conversation would skip the kill switch, trust classification, and the
+      // admission floor, which is exactly the gap this channel must not open,
+      // so it is logged and dropped until the host offers a way in that is not
+      // a webhook reply. Deployments that need inbound run `ingressMode:
+      // "webhook"`.
       ctx.logger.info(
         {
           actorExternalId: event.actor.actorExternalId,

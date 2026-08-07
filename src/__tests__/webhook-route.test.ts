@@ -49,12 +49,34 @@ afterEach(() => {
 });
 
 describe("handleProviderWebhook", () => {
-  test("accepts a delivery for the configured provider", async () => {
+  test("answers a delivery with the message the gateway will admit", async () => {
+    // The reply is the handoff. `channels/ingress.json` declares `inbound` on
+    // this route, so what comes back here is what runs through the kill
+    // switch, trust classification, and the admission floor.
     setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
     const response = await handleProviderWebhook("comms", post(commsDelivery()));
 
     expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toEqual({ ok: true });
+    expect(await bodyOf(response)).toMatchObject({
+      version: "v1",
+      message: {
+        content: "hello",
+        conversationExternalId: "+15551234567",
+        externalMessageId: "msg_01",
+      },
+      actor: { actorExternalId: "+15551234567" },
+      source: { chatType: "imessage" },
+    });
+  });
+
+  test("keeps the vendor's payload out of the reply", async () => {
+    // `raw` is in the event contract so a normalizer can hand the payload to a
+    // later stage. The gateway discards it, so sending it back would put the
+    // whole delivery on the wire again for nobody.
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
+    const response = await handleProviderWebhook("comms", post(commsDelivery()));
+
+    expect(await bodyOf(response)).not.toHaveProperty("raw");
   });
 
   test("ignores a delivery on a provider that is not configured", async () => {
@@ -104,7 +126,7 @@ describe("handleProviderWebhook", () => {
     const body = await bodyOf(
       await handleProviderWebhook("comms", post(commsDelivery())),
     );
-    expect(body).toMatchObject({ ok: true });
+    expect(body).toHaveProperty("actor");
     expect(body).not.toHaveProperty("ignored");
   });
 

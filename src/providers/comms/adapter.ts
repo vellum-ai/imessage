@@ -26,6 +26,7 @@ import type {
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveApiKey } from "../../config.ts";
+import { pickWebhookRegistration } from "../../webhook-endpoint.ts";
 
 export function createCommsProvider(): MessagingProvider {
   const client = new CommsClient();
@@ -72,12 +73,19 @@ export function createCommsProvider(): MessagingProvider {
      * an existing registration hands its secret over rather than being torn
      * down: `opts.hasSecret` is deliberately unused here. A lost secret is a
      * `GET` away, and re-registering would change the webhook id for nothing.
+     *
+     * Matching ignores a trailing slash — see {@link sameWebhookUrl}. Without
+     * that, a registration stored as `events-comms/` reads as a different
+     * address, this creates a second one beside it, and both deliver under
+     * different secrets.
      */
     async ensureWebhook(
       opts: EnsureWebhookOptions,
     ): Promise<WebhookRegistration> {
-      const existing = webhooksFromListing(await client.listWebhooks()).find(
-        (hook) => webhookUrlOf(hook) === opts.url,
+      const existing = pickWebhookRegistration(
+        webhooksFromListing(await client.listWebhooks()),
+        opts.url,
+        webhookUrlOf,
       );
       if (existing) {
         return { created: false, id: existing.id, secret: existing.secret };

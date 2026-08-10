@@ -38,6 +38,7 @@ type PhotonChatResult = Awaited<
 type MessageListPage = Awaited<
   ReturnType<ReturnType<MessageClientFactory>["listRecent"]>
 >;
+const { sameWebhookUrl } = await import("../webhook-endpoint.ts");
 const { PROVIDER_IDS } = await import("../providers/types.ts");
 const { resolveProvider } = await import("../providers/index.ts");
 const { IMessageConfigSchema } = await import("../config.ts");
@@ -374,6 +375,35 @@ describe("photon provider", () => {
     if (!readiness.ready) {
       expect(readiness.reason).toContain("Photon project ID");
       expect(readiness.reason).toContain("settings app");
+    }
+  });
+
+  test("an unresolvable credential quotes what the store said", async () => {
+    // The host raises one un-discriminated error for a missing reference, an
+    // unreachable store, and a scoping refusal, so this cannot assert which it
+    // was. Dropping the store's own words is what made a real incident
+    // undiagnosable: registration failed and the reason named a setting that
+    // was already correct.
+    credentialMode = "throw";
+    const readiness = await createPhotonProvider().checkReadiness();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("credential not found");
+    }
+  });
+
+  test("does not assert a credential is unset when it cannot know", async () => {
+    // "is not set" sends the reader to check a setting. That is the right move
+    // most of the time and exactly wrong when the store was merely down, and
+    // from here the two are indistinguishable.
+    credentialMode = "throw";
+    const readiness = await createPhotonProvider().checkReadiness();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("could not be resolved");
+      expect(readiness.reason).toContain("unreachable credential store");
     }
   });
 
@@ -938,6 +968,151 @@ describe("webhook registration", () => {
       }),
     ).toEqual({ created: false, id: "wh_p" });
     expect(calls).toHaveLength(1);
+  });
+
+  test("comms reuses a registration stored with a trailing slash", async () => {
+    // The platform's callback registration used to append one, so a webhook
+    // created then is stored as `.../events-comms/`. Reading that as a
+    // different address creates a second registration beside it: both deliver,
+    // each signed with its own secret, and the plugin holds only the newer one
+    // — so every other delivery 403s on verification, seemingly depending on
+    // which spelling of the URL was used.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({
+            webhooks: [
+              {
+                id: "wh_slashed",
+                url: "https://host.example/events-comms/",
+                secret: "whsec_existing",
+              },
+            ],
+          })
+        : Response.json({}),
+    );
+
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/events-comms",
+      hasSecret: false,
+    });
+
+    expect(result).toEqual({
+      created: false,
+      id: "wh_slashed",
+      secret: "whsec_existing",
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("comms still treats a different path as a different registration", () => {
+    // Only the trailing slash is forgiven. Anything else really is another
+    // address, and matching on it would leave a stale registration pointed
+    // somewhere the gateway does not serve.
+    expect(
+      sameWebhookUrl(
+        "https://host.example/events-comms",
+        "https://host.example/events-photon",
+      ),
+    ).toBe(false);
+    expect(
+      sameWebhookUrl(
+        "https://host.example/events-comms",
+        "https://other.example/events-comms",
+      ),
+    ).toBe(false);
+    expect(
+      sameWebhookUrl(
+        "https://host.example/events-comms",
+        "https://host.example/events-comms/",
+      ),
+    ).toBe(true);
+  });
+
+  test("comms prefers the exact url when a duplicate already exists", async () => {
+    // A deployment that grew a second registration before the comparison was
+    // fixed has two live webhooks and two secrets, and only the one whose
+    // secret is stored verifies. Which one that is decides which half of the
+    // traffic 403s, so it is picked deterministically rather than by whatever
+    // order the provider listed them in.
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({
+            webhooks: [
+              {
+                id: "wh_slashed",
+                url: "https://host.example/events-comms/",
+                secret: "whsec_stale",
+              },
+              {
+                id: "wh_exact",
+                url: "https://host.example/events-comms",
+                secret: "whsec_current",
+              },
+            ],
+          })
+        : Response.json({}),
+    );
+
+    expect(
+      await createCommsProvider().ensureWebhook({
+        url: "https://host.example/events-comms",
+        hasSecret: false,
+      }),
+    ).toEqual({
+      created: false,
+      id: "wh_exact",
+      secret: "whsec_current",
+    });
+  });
+
+  test("photon reuses a registration stored with a trailing slash", async () => {
+    // Worse here than on Comms: a miss neither reuses nor deletes, so the old
+    // registration keeps delivering under a secret Photon will never reissue.
+    stubPhoton((call) =>
+      call.path.includes("/webhooks/")
+        ? Response.json({
+            succeed: true,
+            data: [{ id: "wh_p", webhookUrl: "https://host.example/mine/" }],
+          })
+        : undefined,
+    );
+
+    expect(
+      await createPhotonProvider().ensureWebhook({
+        url: "https://host.example/mine",
+        hasSecret: true,
+      }),
+    ).toEqual({ created: false, id: "wh_p" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("photon replaces a slashed registration when the secret is gone", async () => {
+    // The registration is found, so it is deleted rather than left behind to
+    // deliver alongside the new one.
+    stubPhoton((call) => {
+      if (!call.path.includes("/webhooks/")) return undefined;
+      if (call.init.method === "GET") {
+        return Response.json({
+          succeed: true,
+          data: [{ id: "wh_old", webhookUrl: "https://host.example/mine/" }],
+        });
+      }
+      if (call.init.method === "DELETE") {
+        return Response.json({ succeed: true, data: {} });
+      }
+      return Response.json({
+        succeed: true,
+        data: { id: "wh_new", signingSecret: "s3cr3t" },
+      });
+    });
+
+    await createPhotonProvider().ensureWebhook({
+      url: "https://host.example/mine",
+      hasSecret: false,
+    });
+
+    expect(calls.map((c) => c.init.method)).toEqual(["GET", "DELETE", "POST"]);
+    expect(calls[1]?.path).toContain("/webhooks/wh_old");
   });
 
   test("photon registration needs no message-plane token", async () => {

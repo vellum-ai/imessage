@@ -37,7 +37,7 @@ import type {
   TokenResponse,
 } from "./schemas.ts";
 import { resolveCredentialField } from "../../config.ts";
-import { describeApiFailure } from "../error-detail.ts";
+import { describeApiFailure, describeError } from "../error-detail.ts";
 import type {
   AddressReport,
   CreateChatInput,
@@ -408,7 +408,18 @@ export class PhotonClient {
         await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1));
       }
 
-      const response = await fetch(url, buildInit());
+      // See the matching note in the Comms client: a transport failure rejects
+      // with the reason on `.cause`, and unwrapped it names neither the
+      // request nor the cause.
+      let response: Response;
+      try {
+        response = await fetch(url, buildInit());
+      } catch (err) {
+        throw new PhotonApiError(
+          `${label} could not be reached: ${describeError(err)}`,
+          0,
+        );
+      }
       if (response.ok) {
         return await response.json().catch(() => ({}));
       }

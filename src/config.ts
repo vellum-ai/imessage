@@ -13,6 +13,7 @@
 import { resolveCredential } from "@vellumai/plugin-api";
 import { z } from "zod";
 
+import { describeError } from "./providers/error-detail.ts";
 import type { ProviderId } from "./providers/types.ts";
 import { PROVIDER_IDS } from "./providers/types.ts";
 
@@ -181,21 +182,47 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
  * rewritten here into an error naming both places the value can be set. The
  * settings app is the shorter path, and a user looking at this message inside
  * the app should not be told to go find a terminal.
+ *
+ * What the resolver said is kept, which it previously was not. `catch {}`
+ * discarded it and answered "is not set" for every failure — including a
+ * credential store that was briefly unreachable, the ordinary condition a
+ * plugin starting alongside one can catch. That is the one diagnosis
+ * guaranteed to waste the reader's time, because it sends them to check a
+ * setting that is already correct. It is the shape of a real incident: webhook
+ * registration failed five seconds after a restart and the only recorded
+ * reason named the wrong cause.
+ *
+ * The guidance still leads, because unset really is the common case and the
+ * host gives no way to prove otherwise — `CredentialResolutionError` covers a
+ * missing reference, an unreachable store, and a scoping refusal with one
+ * un-discriminated type. So the wording stops asserting which it was, and the
+ * resolver's own words are appended and attached as `cause`. Narrowing this
+ * properly needs a reason code on the host error; until there is one, quoting
+ * the store beats guessing for it.
  */
 export async function resolveCredentialField(
   field: string,
   label: string,
 ): Promise<string> {
+  const guidance =
+    `Add it in the iMessage settings app, or run: ` +
+    `assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${field} <value>`;
+
+  let value: string | undefined;
   try {
-    const value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
-    if (value) return value;
-  } catch {
-    // Fall through to the actionable message below.
+    value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
+  } catch (err) {
+    throw new Error(
+      `${label} could not be resolved — most likely it is not set, though an ` +
+        `unreachable credential store looks the same from here. ${guidance}. ` +
+        `The credential store reported: ${describeError(err)}`,
+      { cause: err },
+    );
   }
-  throw new Error(
-    `${label} is not set. Add it in the iMessage settings app, or run: ` +
-      `assistant credentials set --service ${CREDENTIAL_SERVICE} --field ${field} <value>`,
-  );
+
+  if (value) return value;
+
+  throw new Error(`${label} is not set. ${guidance}`);
 }
 
 /** Read the Comms API key. */

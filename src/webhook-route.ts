@@ -16,6 +16,12 @@
  * verification, body-size limits, and rate limiting are all its job, and
  * re-implementing them here would mean two schemes to keep in sync and one to
  * get subtly wrong.
+ *
+ * It also reads what this handler returns. A route declaring `inbound` in
+ * `channels/ingress.json` — both of these do — is one whose reply carries the
+ * message, and the gateway runs that reply through the same admission pipeline
+ * every built-in channel goes through. So the normalized event is the response
+ * body, and a delivery that is not a turn says so by replying without one.
  */
 
 import { getConfig } from "./plugin-state.ts";
@@ -69,8 +75,17 @@ export async function handleProviderWebhook(
     return json(200, { ok: true, ignored: "not an inbound message" });
   }
 
-  // TODO(pluggable-channels): forward to the host's inbound pipeline so the
-  // event runs through the kill switch, trust classification, and the
-  // admission floor. See the matching note in hooks/init.ts.
-  return json(200, { ok: true });
+  // The reply *is* the handoff. The gateway forwarded this delivery here after
+  // verifying it, reads what comes back, and — because `channels/ingress.json`
+  // declares `inbound` on this route — runs it through the kill switch, trust
+  // classification, and the admission floor before anything reaches a
+  // conversation. Nothing here posts a message; a plugin that could would be
+  // going around all three.
+  //
+  // Sent whole, `raw` included. The gateway understands only the fields the
+  // manifest declares, so anything Comms or Photon sent beyond them survives
+  // there or nowhere — and the vendor's payload is the thing a later stage
+  // would have to re-read to answer a question this normalizer did not
+  // anticipate.
+  return json(200, event);
 }

@@ -12,6 +12,7 @@
  */
 
 import { readSecret, storeSecret } from "./app-credentials.ts";
+import { describeError } from "./providers/error-detail.ts";
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
 import { WEBHOOK_SECRET_FIELDS } from "./config.ts";
@@ -23,6 +24,7 @@ import {
   setChannel,
   setConfig,
   setWebhookReport,
+  type WebhookRegistrationStep,
   setProvider,
   setSupervisor,
 } from "./plugin-state.ts";
@@ -66,6 +68,14 @@ export interface StartRuntimeResult {
  * Never throws. An unregistered webhook is a channel that hears nothing, not a
  * channel that failed to load, and taking the daemon's boot down over a
  * provider's 500 would be the worse trade.
+ *
+ * Every exit records which step it got to. Four things happen here — reading
+ * the held secret, resolving the public URL, asking the provider, storing what
+ * it issued — and they fail for entirely different reasons. A report that says
+ * only "failed" leaves a reader unable to tell a credential store that was
+ * down from a provider that refused the request, which is the position the
+ * incident this was written for left us in: the registration failed five
+ * seconds after a restart and the record named neither the step nor the cause.
  */
 async function registerWebhook(
   provider: MessagingProvider,
@@ -73,34 +83,67 @@ async function registerWebhook(
 ): Promise<void> {
   const secretField = WEBHOOK_SECRET_FIELDS[provider.id];
   const at = new Date().toISOString();
+  let step: WebhookRegistrationStep = "read-secret";
+
+  /** Record and log one failure, naming the step it happened at. */
+  const fail = (err: unknown, message: string): void => {
+    const reason = describeError(err);
+    setWebhookReport({ provider: provider.id, outcome: "failed", step, reason, at });
+    logger.warn(
+      // `reason` alongside `err`: the host's logger may or may not expand an
+      // Error, and a warning that renders as `{}` is how this became
+      // undiagnosable in the first place.
+      { err, reason, step, provider: provider.id },
+      `imessage: ${message} — the channel is running but will not hear anything`,
+    );
+  };
 
   try {
     const held = await readSecret(secretField);
+    if (held.status === "absent" && held.error) {
+      // Not a failure: a fresh install has no secret and the host throws for
+      // that exactly as it does for a store it could not reach, with no way to
+      // tell them apart (see `readSecret`). Registration proceeds — stopping
+      // here would break first-time setup — but the store's own words are
+      // recorded, because they are the only thing that will distinguish "there
+      // was nothing to read" from "a working secret was invisible for a
+      // moment", and the second one silently rotates a Photon registration.
+      logger.info(
+        { provider: provider.id, field: secretField, reason: describeError(held.error) },
+        "imessage: no stored webhook secret was readable — treating it as unset, which is right on a first run and wrong if the credential store was merely unavailable",
+      );
+    }
+
+    step = "resolve-url";
     const endpoint = await resolveWebhookEndpoint(provider.id);
     if (!endpoint.ok) {
       setWebhookReport({
         provider: provider.id,
         outcome: "skipped",
+        step,
         reason: endpoint.reason,
         at,
       });
       logger.warn(
-        { provider: provider.id, reason: endpoint.reason },
+        { provider: provider.id, step, reason: endpoint.reason },
         "imessage: no webhook could be registered — inbound will not arrive until the assistant has a public URL or ingressMode is 'poll'",
       );
       return;
     }
 
+    step = "call-provider";
     const result = await provider.ensureWebhook({
       url: endpoint.url,
-      hasSecret: Boolean(held),
+      hasSecret: held.status === "held",
     });
 
     // Store before reporting success: a secret dropped here leaves a
     // registration whose deliveries nothing can verify. Providers hand one
     // back on every registration they can — Photon only when it creates,
     // Comms whenever asked — so this runs whether or not anything was created.
-    if (result.secret && result.secret !== held) {
+    step = "store-secret";
+    const previous = held.status === "held" ? held.value : undefined;
+    if (result.secret && result.secret !== previous) {
       await storeSecret(secretField, result.secret);
     }
 
@@ -120,17 +163,7 @@ async function registerWebhook(
     // Everything is inside the boundary, minting and storing included: this
     // runs un-awaited, so anything escaping is an unhandled rejection rather
     // than a channel that reports what went wrong.
-    const reason = err instanceof Error ? err.message : String(err);
-    setWebhookReport({
-      provider: provider.id,
-      outcome: "failed",
-      reason,
-      at,
-    });
-    logger.warn(
-      { err, provider: provider.id },
-      "imessage: could not register the inbound webhook — the channel is running but will not hear anything",
-    );
+    fail(err, "could not register the inbound webhook");
   }
 }
 
@@ -261,10 +294,16 @@ export function startChannelRuntime(
     },
     logger: ctx.logger,
     sink: (event) => {
-      // TODO(pluggable-channels): hand the event to the host's inbound
-      // pipeline so it runs through the kill switch, trust classification, and
-      // the admission floor. Posting straight into a conversation would bypass
-      // all three, which is exactly the gap this channel must not open.
+      // Still nowhere to hand this. Webhook mode reaches the host's inbound
+      // pipeline by *answering* a delivery the gateway forwarded — see
+      // `webhook-route.ts` and the `inbound` declaration in
+      // `channels/ingress.json` — and a polled message is not a reply to
+      // anything, so it has no such opening. Posting it straight into a
+      // conversation would skip the kill switch, trust classification, and the
+      // admission floor, which is exactly the gap this channel must not open,
+      // so it is logged and dropped until the host offers a way in that is not
+      // a webhook reply. Deployments that need inbound run `ingressMode:
+      // "webhook"`.
       ctx.logger.info(
         {
           actorExternalId: event.actor.actorExternalId,

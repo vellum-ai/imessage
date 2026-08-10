@@ -65,6 +65,29 @@ verification is not implemented for the route's descriptor yet; a 200 with
 `ignored: "not an inbound message"` in the plugin's logs means the whole path
 works and a ping is simply not a turn.
 
+**The provider shows zero webhooks and nothing says why** — the plugin records
+its last registration attempt in the settings app, and the line names the step
+it stopped at. Four unrelated things fail here and the remedies have nothing in
+common, so read the step before changing anything:
+
+- *reading the stored webhook secret* — never fatal on its own; registration
+  continues. If it appears, the credential store answered oddly.
+- *working out this assistant's public URL* — there is no address to register.
+  The assistant needs a tunnel or a public ingress URL, or `ingressMode: "poll"`.
+- *asking the provider to register the webhook* — the provider refused. The
+  reason carries its status and its own words: a 401 is the wrong key, a 403 is
+  a missing scope (`comms_webhooks`), a `could not be reached` is the network.
+- *storing the secret the provider issued* — the registration exists but its
+  secret was not saved, so deliveries will not verify. Re-run setup.
+
+**"could not be resolved — most likely it is not set"** — the wording is hedged
+because it has to be. The host raises one error for a missing credential, an
+unreachable credential store, and a scoping refusal, so the plugin cannot tell
+them apart and does not pretend to. The sentence ends with what the store
+itself said; read that before re-entering a credential. A restart is the usual
+context — the store may simply not have been up yet, in which case the value
+was fine and the next start will find it.
+
 **Messages sent before setup do not appear** — expected. The channel starts from
 the moment of setup rather than replaying history.
 

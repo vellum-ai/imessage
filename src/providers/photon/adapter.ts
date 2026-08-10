@@ -25,6 +25,7 @@ import type {
   WebhookRegistration,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
+import { pickWebhookRegistration } from "../../webhook-endpoint.ts";
 
 /** A chat guid, as opposed to a handle we would have to resolve one for. */
 function isChatGuid(value: string): boolean {
@@ -157,12 +158,19 @@ export function createPhotonProvider(
      * no secret is worse than none: deliveries arrive and nothing can verify
      * them. Deleting and recreating is the only way back to a verifiable
      * webhook, and Photon's own docs say the same.
+     *
+     * Matching ignores a trailing slash — see {@link sameWebhookUrl}. Without
+     * that, a registration stored as `events-photon/` reads as a different
+     * address, so it is neither reused nor deleted: this creates a second one
+     * beside it, both deliver, and only the newer secret verifies.
      */
     async ensureWebhook(
       opts: EnsureWebhookOptions,
     ): Promise<WebhookRegistration> {
-      const existing = (await client.listWebhooks()).find(
-        (hook) => hook.webhookUrl === opts.url,
+      const existing = pickWebhookRegistration(
+        await client.listWebhooks(),
+        opts.url,
+        (hook) => hook.webhookUrl,
       );
 
       if (existing && opts.hasSecret) {

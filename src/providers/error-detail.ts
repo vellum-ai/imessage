@@ -96,3 +96,70 @@ export function describeApiFailure(
     ? `${label} failed: ${status} — ${detail}`
     : `${label} failed: ${status}`;
 }
+
+/**
+ * Everything a caught error knows, as one line.
+ *
+ * `err.message` alone is what left a real incident undiagnosable: the plugin's
+ * webhook registration failed five seconds after a restart, reported one
+ * sentence, and the sentence did not contain the cause. Three things were
+ * missing from it.
+ *
+ * **The cause chain.** `fetch` rejects with a bare `TypeError: fetch failed`
+ * and puts the real answer — ECONNREFUSED, a DNS failure, a TLS error — on
+ * `.cause`. Reading only `.message` reports the least informative frame of the
+ * error and discards the only one that says what happened. Causes are followed
+ * to a bounded depth and appended, so a wrapped error reads as the chain it is.
+ *
+ * **The status.** `CommsApiError` and `PhotonApiError` carry the HTTP status
+ * they were built from, and it is what separates "the key is wrong" (401) from
+ * "the scope is missing" (403) from "the provider is down" (503). It is
+ * already in the message for those two, but any other error carrying a
+ * `status` gets it named here rather than dropped.
+ *
+ * **The type.** A `TypeError` and an `Error` mean different things at the same
+ * message text, and the name is one word.
+ *
+ * Bounded and single-line for the same reason {@link errorBodyDetail} is: this
+ * goes into log lines and into the settings app, and an unbounded cause chain
+ * from a third-party library would bury the failure it is meant to explain.
+ */
+export function describeError(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+
+  // Three frames is enough for `fetch` → undici → syscall, which is the chain
+  // that actually matters here, and short of a library that wraps ten deep.
+  for (let depth = 0; depth < 3 && current !== undefined && current !== null; depth++) {
+    parts.push(describeOneError(current, depth));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+
+  const line = parts.filter(Boolean).join(": caused by ");
+  return line.length > MAX_DETAIL_LENGTH
+    ? `${line.slice(0, MAX_DETAIL_LENGTH)}…`
+    : line;
+}
+
+/** One frame of {@link describeError}'s chain. */
+function describeOneError(err: unknown, depth: number): string {
+  if (!(err instanceof Error)) {
+    return String(err).replace(/\s+/g, " ").trim();
+  }
+
+  const message = err.message.replace(/\s+/g, " ").trim();
+  // The outermost frame names its type, because `TypeError: fetch failed` and
+  // `Error: fetch failed` are different diagnoses. Inner frames do not: the
+  // chain is already attributed by the frame above it.
+  const named =
+    depth === 0 && err.name && err.name !== "Error"
+      ? `${err.name}: ${message}`
+      : message;
+
+  const status = (err as { status?: unknown }).status;
+  // Only when it is not already in the message — both API error types build
+  // their message from `describeApiFailure`, which leads with the status.
+  return typeof status === "number" && !named.includes(String(status))
+    ? `${named} (status ${status})`
+    : named;
+}

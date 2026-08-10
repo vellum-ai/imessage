@@ -132,6 +132,60 @@ function withoutTrailingSlash(url: string): string {
 }
 
 /**
+ * Whether two webhook URLs name the same registration.
+ *
+ * They do when they differ only by a trailing slash, because the gateway
+ * serves both spellings of a declared route — matching ignores one trailing
+ * slash (`findDeclaredRoute`) — so a provider pointed at either delivers to
+ * the same place.
+ *
+ * This exists because comparing with `===` had a consequence far worse than a
+ * cosmetic mismatch. `ensureWebhook` lists first and creates only when nothing
+ * matches, so a registration stored as `events-comms/` did not match the
+ * `events-comms` we now ask for, and the next start created a *second*
+ * registration next to it. Both then delivered, each signed with its own
+ * secret, and the plugin held only the newer one — so every other delivery
+ * failed signature verification with a 403 that looked like it depended on
+ * which spelling of the URL you had used.
+ *
+ * Only the trailing slash is forgiven. Everything else — scheme, host, port,
+ * case, query — is compared verbatim, because any other difference really is a
+ * different address and matching on it would leave a stale registration
+ * delivering to somewhere the gateway is not serving.
+ */
+export function sameWebhookUrl(a: string, b: string): boolean {
+  return withoutTrailingSlash(a.trim()) === withoutTrailingSlash(b.trim());
+}
+
+/**
+ * The registration to use for `url`, out of everything the provider lists.
+ *
+ * Matching by {@link sameWebhookUrl} can find more than one, on a deployment
+ * that already grew a duplicate before the comparison was fixed. Which one is
+ * picked decides which secret this plugin holds, and therefore which of the
+ * two live registrations verifies — so it is decided here rather than left to
+ * whatever order the provider happened to list them in.
+ *
+ * An exact match wins. The plugin always asks for the canonical spelling, so
+ * preferring it means a deployment converges on the registration the plugin
+ * itself created rather than oscillating between them across restarts.
+ * Cleaning up the leftover is still a manual step in the provider's dashboard;
+ * neither vendor's listing tells us which of two registrations is the one
+ * someone meant to keep.
+ */
+export function pickWebhookRegistration<T>(
+  candidates: readonly T[],
+  url: string,
+  urlOf: (candidate: T) => string | undefined,
+): T | undefined {
+  const matches = candidates.filter((candidate) => {
+    const found = urlOf(candidate);
+    return found !== undefined && sameWebhookUrl(found, url);
+  });
+  return matches.find((candidate) => urlOf(candidate)?.trim() === url.trim()) ?? matches[0];
+}
+
+/**
  * The absolute URL a provider posts deliveries to, or why there is not one.
  *
  * `resolver` is a test seam. The real one comes off the plugin-api namespace,

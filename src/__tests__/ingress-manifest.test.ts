@@ -27,6 +27,11 @@ interface ManifestRoute {
   path: string;
   kind: string;
   description: string;
+  signer?: string;
+  inbound?: {
+    identity?: string;
+    fields?: Record<string, string>;
+  };
   verification?: {
     kind?: string;
     algorithm?: string;
@@ -124,6 +129,46 @@ describe("ingress manifest", () => {
     });
     expect(comms?.payload).toEqual(["body"]);
     expect(comms?.freshness).toBeUndefined();
+  });
+
+  test("every route declares that its replies deliver messages", () => {
+    // Without this the gateway forwards the delivery, returns whatever this
+    // plugin answered, and the message goes no further — which is the inbound
+    // dead end the route handler used to be. A route that receives deliveries
+    // for a channel and does not declare `inbound` is that dead end restored.
+    for (const route of manifest.routes) {
+      expect(route.inbound).toBeDefined();
+    }
+  });
+
+  test("every route declares its addresses are phone numbers", () => {
+    // iMessage addresses by handle, and a handle is a phone number or an Apple
+    // ID. The declaration is what tells the gateway that `(555) 123-4567` and
+    // `+15551234567` are one person; `opaque` would give that sender two
+    // contact records and two trust classifications.
+    for (const route of manifest.routes) {
+      expect(route.inbound?.identity).toBe("phone");
+    }
+  });
+
+  test("no route remaps a field the normalizers already place", () => {
+    // The mapping exists for a plugin that would rather return its own shape.
+    // These normalizers return `PluginInboundEvent`, which is what the
+    // gateway's defaults read, so an override here would be a second spelling
+    // of the contract and a way for the two to drift.
+    for (const route of manifest.routes) {
+      expect(route.inbound?.fields).toBeUndefined();
+    }
+  });
+
+  test("no route is vellum-signed, which would make delivery unapprovable", () => {
+    // The gateway rejects the combination outright: a `vellum` route is served
+    // without a guardian approval, and delivering messages is how a
+    // conversation starts. Asserting it here means the manifest fails in this
+    // repo's tests rather than as a validation problem in someone's gateway.
+    for (const route of manifest.routes) {
+      expect(route.signer).not.toBe("vellum");
+    }
   });
 
   test("every route is http and carries a description", () => {

@@ -119,19 +119,45 @@ export async function storeCredentials(
 }
 
 /**
- * Read a stored credential, or `undefined` when there is none.
+ * A stored secret, or the absence of one and whatever explained it.
+ *
+ * Two states rather than three, deliberately. Telling "no secret stored" from
+ * "could not ask the store" would be the more useful answer, and it is not
+ * available: the host raises one un-discriminated `CredentialResolutionError`
+ * for a missing reference, an unreachable store, and a scoping refusal alike.
+ * A fresh install has no webhook secret and therefore *throws* on the very
+ * first read, so treating a throw as "could not ask" would stop first-time
+ * registration outright — a worse failure than the one it would diagnose.
+ *
+ * So a throw still reads as absent, and `error` carries what was thrown so a
+ * reader can see the difference even though the code cannot act on it.
+ */
+export type SecretRead =
+  | { status: "held"; value: string }
+  | { status: "absent"; error?: unknown };
+
+/**
+ * Read a stored credential, keeping what the store said when there is none.
  *
  * Unlike the user-facing fields, webhook secrets are read back by this plugin:
  * a Comms token has to go into the URL it registers, and knowing whether a
  * Photon secret is held decides whether a registration can be reused.
+ *
+ * That last clause is why the thrown error is kept rather than dropped. "No
+ * secret held" means *delete the registration and create a new one* on Photon,
+ * because it issues a signing secret exactly once. So a store that was briefly
+ * unreachable can rotate a working webhook's secret, and until the host can
+ * say which failure it hit, the error text is the only thing that will show
+ * that is what happened.
  */
-export async function readSecret(field: string): Promise<string | undefined> {
+export async function readSecret(field: string): Promise<SecretRead> {
+  let value: string | undefined;
   try {
-    const value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
-    return value || undefined;
-  } catch {
-    return undefined;
+    value = await resolveCredential(`${CREDENTIAL_SERVICE}/${field}`);
+  } catch (error) {
+    return { status: "absent", error };
   }
+  return value ? { status: "held", value } : { status: "absent" };
 }
 
 /**

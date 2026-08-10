@@ -216,9 +216,19 @@ interface WebhookReport {
   provider: string;
   outcome: "registered" | "already-registered" | "skipped" | "failed";
   url?: string;
+  /** How far it got. Absent on a plugin older than the step being recorded. */
+  step?: "read-secret" | "resolve-url" | "call-provider" | "store-secret";
   reason?: string;
   at: string;
 }
+
+/** What each registration step was doing, in words a reader can act on. */
+const WEBHOOK_STEP_LABELS: Record<string, string> = {
+  "read-secret": "reading the stored webhook secret",
+  "resolve-url": "working out this assistant's public URL",
+  "call-provider": "asking the provider to register the webhook",
+  "store-secret": "storing the secret the provider issued",
+};
 
 interface Settings {
   config: { provider: string; ingressMode: IngressMode };
@@ -281,6 +291,10 @@ function noticeFor(result: ChannelResult, what: string): Notice {
  * set up" and "inbound is silent and you cannot see why". A failure or a skip
  * carries the provider's own reason, since that is what says whether the fix
  * is a credential, a public URL, or nothing you control.
+ *
+ * A failure also names the step. Four unrelated things can fail here and their
+ * remedies have nothing in common, so "registration failed" alone leaves a
+ * reader checking all four — which is where a real incident left us.
  */
 function describeWebhook(
   report: WebhookReport | null,
@@ -297,8 +311,12 @@ function describeWebhook(
       return `Already registered with ${report.provider} at ${report.url}.`;
     case "skipped":
       return `Not registered: ${report.reason ?? "no reason given"}`;
-    case "failed":
-      return `Registration failed: ${report.reason ?? "no reason given"}`;
+    case "failed": {
+      const where = report.step ? WEBHOOK_STEP_LABELS[report.step] : undefined;
+      return `Registration failed${where ? ` while ${where}` : ""}: ${
+        report.reason ?? "no reason given"
+      }`;
+    }
     default:
       return null;
   }

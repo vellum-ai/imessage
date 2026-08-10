@@ -43,12 +43,32 @@ export interface RuntimeContext {
  * In memory on purpose: it describes this process's attempt, and a stale
  * record read from disk after a restart would be worse than none.
  */
+/**
+ * How far registration got before it stopped.
+ *
+ * These fail for entirely unrelated reasons — a credential store that is down,
+ * an assistant with no public URL, a provider refusing the request, a write
+ * that did not land — and the remedies have nothing in common. Naming the step
+ * is what lets a reader skip straight to the right one instead of re-checking
+ * all four.
+ */
+export type WebhookRegistrationStep =
+  | "read-secret"
+  | "resolve-url"
+  | "call-provider"
+  | "store-secret";
+
 export interface WebhookRegistrationReport {
   provider: string;
   outcome: "registered" | "already-registered" | "skipped" | "failed";
   /** Where the provider was pointed, when one was resolved. */
   url?: string;
-  /** Why it was skipped or how it failed. */
+  /** How far it got. Absent on reports written before this was recorded. */
+  step?: WebhookRegistrationStep;
+  /**
+   * Why it was skipped or how it failed, as `describeError` renders it — the
+   * cause chain and the status included, not just the outermost message.
+   */
   reason?: string;
   at: string;
 }

@@ -378,6 +378,35 @@ describe("photon provider", () => {
     }
   });
 
+  test("an unresolvable credential quotes what the store said", async () => {
+    // The host raises one un-discriminated error for a missing reference, an
+    // unreachable store, and a scoping refusal, so this cannot assert which it
+    // was. Dropping the store's own words is what made a real incident
+    // undiagnosable: registration failed and the reason named a setting that
+    // was already correct.
+    credentialMode = "throw";
+    const readiness = await createPhotonProvider().checkReadiness();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("credential not found");
+    }
+  });
+
+  test("does not assert a credential is unset when it cannot know", async () => {
+    // "is not set" sends the reader to check a setting. That is the right move
+    // most of the time and exactly wrong when the store was merely down, and
+    // from here the two are indistinguishable.
+    credentialMode = "throw";
+    const readiness = await createPhotonProvider().checkReadiness();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("could not be resolved");
+      expect(readiness.reason).toContain("unreachable credential store");
+    }
+  });
+
   test("a failed send surfaces what the plane said", async () => {
     // The plane is gRPC, so a failure arrives as a thrown SDK error rather
     // than a status code the client has to interpret. It must reach the

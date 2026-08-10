@@ -207,6 +207,39 @@ describe("webhook registration reporting", () => {
     expect(getWebhookReport()).toBeUndefined();
   });
 
+  test("names the step it got to, not just that it failed", async () => {
+    // Reading the stored secret, resolving the public URL, asking the provider
+    // and storing what it issued fail for unrelated reasons with unrelated
+    // remedies. "failed" alone leaves a reader checking all four — which is
+    // the position a real incident left us in.
+    withContext();
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
+    );
+    await settle();
+
+    const report = getWebhookReport();
+    expect([
+      "read-secret",
+      "resolve-url",
+      "call-provider",
+      "store-secret",
+    ]).toContain(report?.step ?? "");
+  });
+
+  test("still registers on a first run, when no secret has ever been stored", async () => {
+    // A fresh install throws on the very first secret read, exactly as an
+    // unreachable store does. Treating that as "could not ask" and stopping
+    // would break first-time setup outright, so it must get past the secret.
+    withContext();
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
+    );
+    await settle();
+
+    expect(getWebhookReport()?.step).not.toBe("read-secret");
+  });
+
   test("still records when no init context was ever set", async () => {
     // The path that produced the silence: a derived context used to carry a
     // no-op logger, so a failure here went nowhere at all.

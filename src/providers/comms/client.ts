@@ -10,7 +10,7 @@
  */
 
 import { resolveApiKey } from "../../config.ts";
-import { describeApiFailure } from "../error-detail.ts";
+import { describeApiFailure, describeError } from "../error-detail.ts";
 import type { CommsMessage, ListMessagesResponse } from "./schemas.ts";
 import {
   ListMessagesResponseSchema,
@@ -160,13 +160,26 @@ export class CommsClient {
         await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1));
       }
 
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          ...init.headers,
-          Authorization: `Bearer ${apiKey}`,
-        },
-      });
+      // `fetch` rejects rather than resolving for a transport failure —
+      // connection refused, DNS, TLS — and the reason is on `.cause`, not in
+      // the message. Left unwrapped it escapes as a bare `TypeError: fetch
+      // failed` with no mention of which request it was, which is how a
+      // provider being unreachable comes to look like a plugin bug.
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}${path}`, {
+          ...init,
+          headers: {
+            ...init.headers,
+            Authorization: `Bearer ${apiKey}`,
+          },
+        });
+      } catch (err) {
+        throw new CommsApiError(
+          `Comms API ${init.method ?? "GET"} ${path} could not be reached: ${describeError(err)}`,
+          0,
+        );
+      }
 
       if (response.ok) {
         return await response.json().catch(() => ({}));

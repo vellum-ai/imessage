@@ -24,7 +24,7 @@
  * body, and a delivery that is not a turn says so by replying without one.
  */
 
-import { getConfig } from "./plugin-state.ts";
+import { getConfig, recordInboundProbe } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
 import type { ProviderId } from "./providers/types.ts";
 
@@ -69,10 +69,24 @@ export async function handleProviderWebhook(
   // handler correct on its own terms rather than by coincidence.
   const provider = resolveProvider({ config: { ...config, provider: providerId } });
 
-  const event = provider.normalizeWebhook(parsed, new Date().toISOString());
-  if (!event) {
-    // Delivery receipts and outbound echoes land here. Not an error.
-    return json(200, { ok: true, ignored: "not an inbound message" });
+  const delivery = provider.classifyWebhook(parsed, new Date().toISOString());
+
+  if (delivery.kind === "probe") {
+    // The vendor confirming it can reach us. It travels the real pipeline —
+    // same envelope, same signature, same gateway route — so arriving here
+    // proves registration, the signing secret and routing all work. Recorded
+    // so the settings app can say inbound is live without waiting for a human
+    // to text in, and answered distinctly: reporting it as "not an inbound
+    // message" made a successful delivery test read exactly like a failure.
+    recordInboundProbe({ provider: providerId, label: delivery.label });
+    return json(200, { ok: true, probe: delivery.label });
+  }
+
+  if (delivery.kind === "ignored") {
+    // Delivery receipts, outbound echoes, events this provider does not model.
+    // The reason names the event rather than the category, so a vendor that
+    // starts sending something new is visible rather than silently dropped.
+    return json(200, { ok: true, ignored: delivery.reason });
   }
 
   // The reply *is* the handoff. The gateway forwarded this delivery here after
@@ -87,5 +101,5 @@ export async function handleProviderWebhook(
   // there or nowhere — and the vendor's payload is the thing a later stage
   // would have to re-read to answer a question this normalizer did not
   // anticipate.
-  return json(200, event);
+  return json(200, delivery.event);
 }

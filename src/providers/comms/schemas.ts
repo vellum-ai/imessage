@@ -121,6 +121,22 @@ export const COMMS_INBOUND_EVENT = "comms.message.received";
  */
 const INBOUND_EVENT_NAMES = new Set([COMMS_INBOUND_EVENT, "message.received"]);
 
+/**
+ * Comms' delivery test, as `POST /webhooks/{id}/test` sends it.
+ *
+ * It travels the real pipeline — same envelope, same signature — so reaching
+ * this plugin proves registration, the signing secret and the gateway route
+ * all work. Both spellings for the same reason the inbound names have both:
+ * the registration name is documented, the envelope's is not.
+ */
+const PING_EVENT_NAMES = new Set(["comms.ping", "ping"]);
+
+/** Whether an event is the vendor confirming it can reach us. */
+export function isPingEvent(event: WebhookEvent): boolean {
+  const name = event.event ?? event.type;
+  return name !== undefined && PING_EVENT_NAMES.has(name);
+}
+
 /** Pull the message out of either envelope shape. */
 export function messageFromWebhookEvent(
   event: WebhookEvent,

@@ -783,11 +783,14 @@ describe("photon provider", () => {
     expect(plane.closed()).toBe(1);
   });
 
+  /** The event of a delivery the classifier called a message, or undefined. */
+  function messageFrom(raw: unknown, receivedAt: string) {
+    const delivery = createPhotonProvider().classifyWebhook(raw, receivedAt);
+    return delivery.kind === "message" ? delivery.event : undefined;
+  }
+
   test("normalizes the documented webhook delivery", () => {
-    const event = createPhotonProvider().normalizeWebhook(
-      photonWebhook(),
-      "2026-07-28T12:00:30.000Z",
-    );
+    const event = messageFrom(photonWebhook(), "2026-07-28T12:00:30.000Z");
 
     expect(event?.actor.actorExternalId).toBe("+15550100");
     // The space id is the chat guid a reply is addressed to, so binding on it
@@ -799,7 +802,7 @@ describe("photon provider", () => {
   });
 
   test("an outbound echo is never a turn", () => {
-    const event = createPhotonProvider().normalizeWebhook(
+    const event = messageFrom(
       photonWebhook({ direction: "outbound" }),
       "2026-07-28T12:00:30.000Z",
     );
@@ -807,7 +810,7 @@ describe("photon provider", () => {
   });
 
   test("an unattributable delivery is dropped rather than guessed at", () => {
-    const event = createPhotonProvider().normalizeWebhook(
+    const event = messageFrom(
       photonWebhook({ sender: { id: "not-a-number" } }),
       "2026-07-28T12:00:30.000Z",
     );

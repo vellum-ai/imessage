@@ -21,7 +21,11 @@ import {
 } from "./app-settings.ts";
 import { startChannelRuntime } from "./channel-runtime.ts";
 import { INGRESS_MODES } from "./config.ts";
-import { getProvider, getWebhookReport } from "./plugin-state.ts";
+import {
+  getInboundProbe,
+  getProvider,
+  getWebhookReport,
+} from "./plugin-state.ts";
 import { pluginConfigPath } from "./plugin-paths.ts";
 import { PROVIDER_IDS } from "./providers/types.ts";
 
@@ -69,6 +73,10 @@ export async function handleSettingsGet(): Promise<Response> {
     // "no webhook exists and nothing says why" was reachable. This is the
     // answer without needing the daemon's log.
     webhook: getWebhookReport() ?? null,
+    // A vendor delivery test that reached this handler. Registration succeeding
+    // says the provider accepted a URL; this says something actually arrived
+    // through it, which is the question a reader with silent inbound has.
+    probe: getInboundProbe() ?? null,
   });
 }
 

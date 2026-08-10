@@ -13,7 +13,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { handleProviderWebhook } from "../webhook-route.ts";
 import { IMessageConfigSchema } from "../config.ts";
-import { resetPluginState, setConfig } from "../plugin-state.ts";
+import {
+  getInboundProbe,
+  resetPluginState,
+  setConfig,
+} from "../plugin-state.ts";
 
 function post(body: unknown): Request {
   return new Request("http://localhost/x/plugins/imessage/events-comms", {
@@ -111,13 +115,64 @@ describe("handleProviderWebhook", () => {
     });
   });
 
+  test("recognizes the vendor's delivery test as a probe, not a failure", async () => {
+    // `POST /webhooks/{id}/test` sends a signed `comms.ping` through the real
+    // pipeline, so one arriving proves registration, the signing secret and
+    // the gateway route all work. Reporting it as "not an inbound message"
+    // made the one available proof of delivery read exactly like a failure.
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
+    const response = await handleProviderWebhook(
+      "comms",
+      post({ event: "comms.ping" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await bodyOf(response)).toEqual({ ok: true, probe: "comms.ping" });
+  });
+
+  test("records the probe so silent inbound is answerable without a text", async () => {
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
+    await handleProviderWebhook("comms", post({ event: "comms.ping" }));
+
+    const probe = getInboundProbe();
+    expect(probe?.provider).toBe("comms");
+    expect(probe?.label).toBe("comms.ping");
+    expect(probe?.at.length ?? 0).toBeGreaterThan(0);
+  });
+
+  test("a probe never becomes a turn", async () => {
+    // It carries no sender and no content. Anything that treated it as a
+    // message would be inventing both.
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
+    const body = await bodyOf(
+      await handleProviderWebhook("comms", post({ event: "comms.ping" })),
+    );
+
+    expect(body).not.toHaveProperty("actor");
+    expect(body).not.toHaveProperty("message");
+  });
+
+  test("names the event it declined rather than the category", async () => {
+    // A vendor that starts sending something new should be visible in the
+    // reply, not folded into one catch-all sentence.
+    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
+    const body = await bodyOf(
+      await handleProviderWebhook("comms", post({ event: "comms.receipt" })),
+    );
+
+    expect(body.ignored).toBe("comms.receipt is not an inbound message");
+  });
+
   test("an outbound echo is not a turn", async () => {
     setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
     const delivery = commsDelivery();
     delivery.message.direction = "outbound";
 
-    expect(await bodyOf(await handleProviderWebhook("comms", post(delivery))))
-      .toMatchObject({ ignored: "not an inbound message" });
+    expect(
+      await bodyOf(await handleProviderWebhook("comms", post(delivery))),
+    ).toMatchObject({
+      ignored: "comms.message.received is not an inbound message",
+    });
   });
 
   test("forwards every inbound message, filtering none by sender", async () => {

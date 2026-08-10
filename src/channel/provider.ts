@@ -17,7 +17,12 @@ export function buildChannelProvider(
     channel: CHANNEL_ID,
 
     normalize(raw: unknown, receivedAt: string): PluginInboundEvent | undefined {
-      return provider.normalizeWebhook(raw, receivedAt);
+      // The host contract still asks for an optional event, so the verdict is
+      // collapsed here rather than at the provider seam. `probe` and `ignored`
+      // both mean "not a turn" to this caller; the route below keeps them
+      // apart, which is where the difference is worth something.
+      const delivery = provider.classifyWebhook(raw, receivedAt);
+      return delivery.kind === "message" ? delivery.event : undefined;
     },
 
     transport: createTransport(provider),

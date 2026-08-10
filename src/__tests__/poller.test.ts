@@ -81,8 +81,8 @@ function stubProvider(
     async send() {
       return {};
     },
-    normalizeWebhook() {
-      return undefined;
+    classifyWebhook() {
+      return { kind: "ignored" as const, reason: "stub" };
     },
     ...overrides,
   };

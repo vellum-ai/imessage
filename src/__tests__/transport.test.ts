@@ -40,8 +40,8 @@ function stubProvider(send?: () => Promise<SendResult>): {
       sends.push({ target, body, idempotencyKey: opts.idempotencyKey });
       return send ? await send() : { id: "msg_out" };
     },
-    normalizeWebhook() {
-      return undefined;
+    classifyWebhook() {
+      return { kind: "ignored" as const, reason: "stub" };
     },
   };
   return { provider, sends };

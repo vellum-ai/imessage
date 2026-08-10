@@ -18,12 +18,14 @@ import {
   CommsMessageSchema,
   conversationIdOf,
   isInboundMessageEvent,
+  isPingEvent,
   messageFromWebhookEvent,
   WebhookEventSchema,
 } from "./schemas.ts";
 import { CHANNEL_ID } from "../../plugin-paths.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveIdentity } from "../../channel/identity.ts";
+import type { WebhookDelivery } from "../types.ts";
 
 /**
  * Chat type stamped on the event.
@@ -110,4 +112,36 @@ export function normalizeWebhookEvent(
   if (!message) return undefined;
 
   return normalizeCommsMessage(message, receivedAt);
+}
+
+/**
+ * Read a Comms delivery and say what it is.
+ *
+ * The order matters. A ping is checked first because it carries no message at
+ * all, so every later branch would report it as something missing rather than
+ * as the successful delivery test it is.
+ */
+export function classifyCommsWebhook(
+  raw: unknown,
+  receivedAt: string,
+): WebhookDelivery {
+  const parsed = WebhookEventSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { kind: "ignored", reason: "unrecognized webhook envelope" };
+  }
+
+  if (isPingEvent(parsed.data)) {
+    return { kind: "probe", label: parsed.data.event ?? parsed.data.type ?? "ping" };
+  }
+
+  if (!isInboundMessageEvent(parsed.data)) {
+    const name = parsed.data.event ?? parsed.data.type ?? "unnamed";
+    return { kind: "ignored", reason: `${name} is not an inbound message` };
+  }
+
+  const message = messageFromWebhookEvent(parsed.data);
+  const event = message ? normalizeCommsMessage(message, receivedAt) : undefined;
+  return event
+    ? { kind: "message", event }
+    : { kind: "ignored", reason: "inbound message carried no usable turn" };
 }

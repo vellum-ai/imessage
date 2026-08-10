@@ -73,6 +73,25 @@ export interface WebhookRegistrationReport {
   at: string;
 }
 
+/**
+ * The last delivery probe this process saw.
+ *
+ * A vendor's own test — Comms' `comms.ping` — travels the real pipeline, so
+ * one arriving is proof that registration, the signing secret, the gateway
+ * route and this handler all work. That is the only confirmation available
+ * without waiting for a human to text in, and it used to be discarded as "not
+ * an inbound message", which reads exactly like the failure it disproves.
+ *
+ * In memory for the same reason the registration report is: it describes this
+ * process, and a stale record read after a restart would be worse than none.
+ */
+export interface InboundProbeReport {
+  provider: string;
+  /** The vendor's own name for the event, e.g. `comms.ping`. */
+  label: string;
+  at: string;
+}
+
 interface PluginState {
   ctx?: RuntimeContext;
   config?: IMessageConfig;
@@ -80,6 +99,7 @@ interface PluginState {
   channel?: PluginChannelProvider;
   supervisor?: PollWorkerSupervisor;
   webhook?: WebhookRegistrationReport;
+  probe?: InboundProbeReport;
 }
 
 const state: PluginState = {};
@@ -130,6 +150,18 @@ export function setWebhookReport(report: WebhookRegistrationReport): void {
   state.webhook = report;
 }
 
+/** Record a delivery probe. Stamped here so the route cannot forget the time. */
+export function recordInboundProbe(probe: {
+  provider: string;
+  label: string;
+}): void {
+  state.probe = { ...probe, at: new Date().toISOString() };
+}
+
+export function getInboundProbe(): InboundProbeReport | undefined {
+  return state.probe;
+}
+
 export function getWebhookReport(): WebhookRegistrationReport | undefined {
   return state.webhook;
 }
@@ -142,4 +174,5 @@ export function resetPluginState(): void {
   state.channel = undefined;
   state.supervisor = undefined;
   state.webhook = undefined;
+  state.probe = undefined;
 }

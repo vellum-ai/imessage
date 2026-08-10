@@ -47,6 +47,20 @@ export interface InboundRecord {
   event?: PluginInboundEvent;
 }
 
+/**
+ * What a webhook delivery turned out to be.
+ *
+ * `probe` is a vendor's own delivery test — Comms' `comms.ping`, sent by
+ * `POST /webhooks/{id}/test` through the real signed pipeline. It carries no
+ * message and must never become a turn, but it is the only way to confirm
+ * registration, signing and routing without waiting for a human to text in, so
+ * it is reported rather than discarded.
+ */
+export type WebhookDelivery =
+  | { kind: "message"; event: PluginInboundEvent }
+  | { kind: "probe"; label: string }
+  | { kind: "ignored"; reason: string };
+
 export interface FetchInboundOptions {
   /** ISO-8601 lower bound. */
   since?: string;
@@ -129,11 +143,21 @@ export interface MessagingProvider {
     opts: { idempotencyKey: string },
   ): Promise<SendResult>;
 
-  /** Turn one webhook delivery into an event, or `undefined` if it is not a turn. */
-  normalizeWebhook(
-    raw: unknown,
-    receivedAt: string,
-  ): PluginInboundEvent | undefined;
+  /**
+   * Read one webhook delivery and say what it is.
+   *
+   * A verdict rather than an optional event, because "not a turn" is three
+   * unrelated things and the caller has to tell them apart. A vendor's
+   * delivery probe means the whole path works and should say so; an outbound
+   * echo is routine; an unparsable body is a bug in one of us. Collapsing all
+   * three into `undefined` is what made a successful delivery test read
+   * exactly like a delivery that had gone nowhere.
+   *
+   * This is also the seam that keeps event handling the plugin's business.
+   * Only the adapter knows its vendor's event vocabulary, so only it can
+   * decide what a given event means.
+   */
+  classifyWebhook(raw: unknown, receivedAt: string): WebhookDelivery;
 
   /**
    * Release whatever the provider is holding open.

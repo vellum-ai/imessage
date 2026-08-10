@@ -7,7 +7,7 @@
  */
 
 import { CommsClient } from "./client.ts";
-import { normalizeCommsMessage, normalizeWebhookEvent } from "./normalize.ts";
+import { classifyCommsWebhook, normalizeCommsMessage } from "./normalize.ts";
 import {
   COMMS_INBOUND_EVENT,
   createdAtOf,
@@ -22,6 +22,7 @@ import type {
   MessagingProvider,
   SendResult,
   SendTarget,
+  WebhookDelivery,
   WebhookRegistration,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
@@ -112,11 +113,8 @@ export function createCommsProvider(): MessagingProvider {
       return { id: message?.id };
     },
 
-    normalizeWebhook(
-      raw: unknown,
-      receivedAt: string,
-    ): PluginInboundEvent | undefined {
-      return normalizeWebhookEvent(raw, receivedAt);
+    classifyWebhook(raw: unknown, receivedAt: string): WebhookDelivery {
+      return classifyCommsWebhook(raw, receivedAt);
     },
   };
 }

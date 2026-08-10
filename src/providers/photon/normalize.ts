@@ -17,6 +17,7 @@ import type { PhotonMessage } from "./message-client.ts";
 import { CHANNEL_ID } from "../../plugin-paths.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
 import { resolveIdentity } from "../../channel/identity.ts";
+import type { WebhookDelivery } from "../types.ts";
 
 /**
  * Chat type stamped on the event.
@@ -129,4 +130,21 @@ export function normalizeWebhookEvent(
     },
     raw: (raw ?? {}) as Record<string, unknown>,
   };
+}
+
+/**
+ * Read a Photon delivery and say what it is.
+ *
+ * Photon has no delivery-test event — `messages` is the only thing it sends —
+ * so this never reports a probe. The verdict shape is shared anyway: the route
+ * above should not have to know which vendors have one.
+ */
+export function classifyPhotonWebhook(
+  raw: unknown,
+  receivedAt: string,
+): WebhookDelivery {
+  const event = normalizeWebhookEvent(raw, receivedAt);
+  return event
+    ? { kind: "message", event }
+    : { kind: "ignored", reason: "not an inbound message" };
 }

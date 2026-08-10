@@ -14,7 +14,7 @@
 
 import { PhotonClient } from "./client.ts";
 import type { MessageClientFactory } from "./message-client.ts";
-import { normalizePhotonMessage, normalizeWebhookEvent } from "./normalize.ts";
+import { classifyPhotonWebhook, normalizePhotonMessage } from "./normalize.ts";
 import type {
   EnsureWebhookOptions,
   FetchInboundOptions,
@@ -22,6 +22,7 @@ import type {
   MessagingProvider,
   SendResult,
   SendTarget,
+  WebhookDelivery,
   WebhookRegistration,
 } from "../types.ts";
 import type { PluginInboundEvent } from "../../channel/contract.ts";
@@ -262,11 +263,8 @@ export function createPhotonProvider(
       );
     },
 
-    normalizeWebhook(
-      raw: unknown,
-      receivedAt: string,
-    ): PluginInboundEvent | undefined {
-      return normalizeWebhookEvent(raw, receivedAt);
+    classifyWebhook(raw: unknown, receivedAt: string): WebhookDelivery {
+      return classifyPhotonWebhook(raw, receivedAt);
     },
 
     async close(): Promise<void> {

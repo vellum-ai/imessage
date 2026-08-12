@@ -151,13 +151,25 @@ describe("ingress manifest", () => {
     }
   });
 
-  test("no route remaps a field the normalizers already place", () => {
-    // The mapping exists for a plugin that would rather return its own shape.
-    // These normalizers return `PluginInboundEvent`, which is what the
-    // gateway's defaults read, so an override here would be a second spelling
-    // of the contract and a way for the two to drift.
+  test("every inbound route says where the vendor puts its fields", () => {
+    // The gateway reads the sender and the chat out of the vendor's own
+    // delivery, before this plugin sees it, so that it can gate before we can
+    // act. Its defaults describe `PluginInboundEvent`, a shape neither Comms
+    // nor Photon sends, so a route that declared nothing would have the
+    // gateway find no sender and forward every message ungated as if it were
+    // a probe.
     for (const route of manifest.routes) {
-      expect(route.inbound?.fields).toBeUndefined();
+      if (!route.inbound) continue;
+      const fields = route.inbound.fields;
+      expect(fields).toBeDefined();
+      for (const required of [
+        "content",
+        "conversationExternalId",
+        "externalMessageId",
+        "actorExternalId",
+      ]) {
+        expect(fields?.[required as keyof typeof fields]).toBeDefined();
+      }
     }
   });
 

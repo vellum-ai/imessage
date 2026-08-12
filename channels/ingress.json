@@ -34,7 +34,20 @@
         }
       },
       "inbound": {
-        "identity": "phone"
+        "identity": "phone",
+        "fields": {
+          "content": "message.content.text",
+          "conversationExternalId": ["message.space.id", "space.id"],
+          "externalMessageId": "message.id",
+          "actorExternalId": "message.sender.id",
+          "chatType": {
+            "from": ["message.platform", "space.platform"],
+            "map": {
+              "iMessage": "imessage"
+            },
+            "default": "sms"
+          }
+        }
       }
     },
     {
@@ -52,12 +65,27 @@
           "encoding": "hex",
           "prefix": "sha256="
         },
-        "payload": [
-          "body"
-        ]
+        "payload": ["body"]
       },
       "inbound": {
-        "identity": "phone"
+        "identity": "phone",
+        "fields": {
+          "content": "message.body",
+          "conversationExternalId": [
+            "message.conversation_id",
+            "message.conversationId",
+            "message.from"
+          ],
+          "externalMessageId": "message.id",
+          "actorExternalId": "message.from",
+          "chatType": {
+            "from": "message.channel",
+            "map": {
+              "imessage": "imessage"
+            },
+            "default": "sms"
+          }
+        }
       }
     }
   ]

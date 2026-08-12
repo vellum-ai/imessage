@@ -26,7 +26,9 @@
 
 import { getConfig, recordInboundProbe } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
+import { describeError } from "./providers/error-detail.ts";
 import type { ProviderId } from "./providers/types.ts";
+import { runTurnForDelivery } from "./run-turn.ts";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -67,7 +69,9 @@ export async function handleProviderWebhook(
   // Built for this route rather than read from plugin state. The two agree —
   // the check above guarantees it — but building from the path keeps the
   // handler correct on its own terms rather than by coincidence.
-  const provider = resolveProvider({ config: { ...config, provider: providerId } });
+  const provider = resolveProvider({
+    config: { ...config, provider: providerId },
+  });
 
   const delivery = provider.classifyWebhook(parsed, new Date().toISOString());
 
@@ -89,17 +93,26 @@ export async function handleProviderWebhook(
     return json(200, { ok: true, ignored: delivery.reason });
   }
 
-  // The reply *is* the handoff. The gateway forwarded this delivery here after
-  // verifying it, reads what comes back, and — because `channels/ingress.json`
-  // declares `inbound` on this route — runs it through the kill switch, trust
-  // classification, and the admission floor before anything reaches a
-  // conversation. Nothing here posts a message; a plugin that could would be
-  // going around all three.
-  //
-  // Sent whole, `raw` included. The gateway understands only the fields the
-  // manifest declares, so anything Comms or Photon sent beyond them survives
-  // there or nowhere — and the vendor's payload is the thing a later stage
-  // would have to re-read to answer a question this normalizer did not
-  // anticipate.
-  return json(200, delivery.event);
+  // Everything that could refuse this message already has. The gateway read
+  // the sender and the chat out of the vendor's own delivery using the
+  // declaration in `channels/ingress.json`, ran the kill switch, the trust
+  // verdict and the intercepts, and compared the sender against the admission
+  // floor, all before forwarding. A delivery that arrives here is one the
+  // assistant is allowed to answer, and answering it is this plugin's job:
+  // nothing on the assistant side speaks Comms or Photon.
+  try {
+    const outcome = await runTurnForDelivery({
+      event: delivery.event,
+      provider,
+    });
+    return json(200, { ok: true, ...outcome });
+  } catch (error) {
+    // 503 rather than 200, so the vendor sends it again. The gateway releases
+    // its dedup claim on this status, so the retry arrives as a fresh delivery
+    // rather than one answered as a duplicate.
+    return json(503, {
+      error: "could not run the turn",
+      detail: describeError(error),
+    });
+  }
 }

@@ -53,46 +53,16 @@ afterEach(() => {
 });
 
 describe("handleProviderWebhook", () => {
-  test("answers a delivery with the message the gateway will admit", async () => {
-    // The reply is the handoff. `channels/ingress.json` declares `inbound` on
-    // this route, so what comes back here is what runs through the kill
-    // switch, trust classification, and the admission floor.
-    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
-    const response = await handleProviderWebhook("comms", post(commsDelivery()));
-
-    expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toMatchObject({
-      version: "v1",
-      message: {
-        content: "hello",
-        conversationExternalId: "+15551234567",
-        externalMessageId: "msg_01",
-      },
-      actor: { actorExternalId: "+15551234567" },
-      source: { chatType: "imessage" },
-    });
-  });
-
-  test("carries the vendor payload forward on the reply", async () => {
-    // The gateway understands only the fields the manifest declares, so
-    // anything the vendor sent beyond them survives on `raw` or nowhere.
-    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
-    const response = await handleProviderWebhook("comms", post(commsDelivery()));
-
-    // The unwrapped message, which is what `normalizeCommsMessage` is handed —
-    // the envelope is the transport, the message is the payload.
-    expect(await bodyOf(response)).toMatchObject({
-      raw: { id: "msg_01", channel: "imessage", direction: "inbound" },
-    });
-  });
-
   test("ignores a delivery on a provider that is not configured", async () => {
     // A registration left behind after switching providers. 200 rather than an
     // error: the delivery is authentic and retrying changes nothing, and a 4xx
     // would have the provider retry or disable a webhook whose only problem is
     // that it is stale.
     setConfig(IMessageConfigSchema.parse({ provider: "photon" }));
-    const response = await handleProviderWebhook("comms", post(commsDelivery()));
+    const response = await handleProviderWebhook(
+      "comms",
+      post(commsDelivery()),
+    );
 
     expect(response.status).toBe(200);
     expect(await bodyOf(response)).toMatchObject({
@@ -175,19 +145,6 @@ describe("handleProviderWebhook", () => {
     });
   });
 
-  test("forwards every inbound message, filtering none by sender", async () => {
-    // The plugin no longer decides who may reach the assistant. That belongs
-    // to the host's inbound pipeline, which classifies the actor against the
-    // gateway's contact ACL; a second list here could only disagree with it.
-    setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
-
-    const body = await bodyOf(
-      await handleProviderWebhook("comms", post(commsDelivery())),
-    );
-    expect(body).toHaveProperty("actor");
-    expect(body).not.toHaveProperty("ignored");
-  });
-
   test("an unparsable body is acknowledged, not retried", async () => {
     setConfig(IMessageConfigSchema.parse({ provider: "comms" }));
     const request = new Request("http://localhost/", {
@@ -198,20 +155,28 @@ describe("handleProviderWebhook", () => {
 
     const response = await handleProviderWebhook("comms", request);
     expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toMatchObject({ ignored: "unparsable body" });
+    expect(await bodyOf(response)).toMatchObject({
+      ignored: "unparsable body",
+    });
   });
 
   test("poll mode leaves no live webhook surface", async () => {
     // An approved declaration the deployment does not use should not answer.
     setConfig(IMessageConfigSchema.parse({ ingressMode: "poll" }));
-    const response = await handleProviderWebhook("comms", post(commsDelivery()));
+    const response = await handleProviderWebhook(
+      "comms",
+      post(commsDelivery()),
+    );
 
     expect(response.status).toBe(404);
   });
 
   test("an unloaded plugin reports 503 rather than dropping the delivery", async () => {
     // 503 invites the provider's retry; a 200 would tell it the message landed.
-    const response = await handleProviderWebhook("comms", post(commsDelivery()));
+    const response = await handleProviderWebhook(
+      "comms",
+      post(commsDelivery()),
+    );
     expect(response.status).toBe(503);
   });
 });

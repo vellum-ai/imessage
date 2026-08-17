@@ -45,10 +45,10 @@ describe("resolveWebhookEndpoint", () => {
     const photon = await resolveWebhookEndpoint("photon");
 
     expect(comms.ok && comms.url).toBe(
-      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-comms`,
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-comms/`,
     );
     expect(photon.ok && photon.url).toBe(
-      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-photon`,
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-photon/`,
     );
   });
 
@@ -116,24 +116,26 @@ describe("with a host that resolves plugin webhook URLs", () => {
     expect(endpoint.ok).toBe(true);
     if (endpoint.ok) {
       expect(endpoint.url).toBe(
-        "https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/events-photon",
+        "https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/events-photon/",
       );
     }
     expect(seen).toEqual([{ plugin: CHANNEL_ID, path: "events-photon" }]);
   });
 
-  test("trims a trailing slash off the host's answer", async () => {
-    // The platform's callback registration appends one, and a provider
-    // delivers to the URL it was given verbatim. The gateway matches the
-    // declared `events-comms`, so a registration carrying the slash 404s.
+  test("hands the vendor a URL with a trailing slash", async () => {
+    // Vellum's managed callback layer 301s a slashless POST onto this
+    // spelling, and following that redirect 404s before HMAC. The gateway
+    // already serves both; registering the canonical one is what keeps the
+    // vendor from walking the redirect. A host that still strips the slash
+    // is corrected here.
     const endpoint = await resolveWebhookEndpoint(
       "comms",
       async (opts) =>
-        `https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/${opts.path}/`,
+        `https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/${opts.path}`,
     );
 
     expect(endpoint.ok && endpoint.url).toBe(
-      "https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/events-comms",
+      "https://callbacks.vellum.ai/abc/webhooks/plugins/imessage/events-comms/",
     );
   });
 

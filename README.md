@@ -57,11 +57,13 @@ software rather than hosting, so reaching the hosted plane means the vendor SDK.
 at the message plane with `Target not allowed for this project`, which reads
 like a bad address but is a policy answer. `POST /projects/{id}/users/`
 registers a recipient; it is idempotent. The plugin calls it when the webhook
-is registered (every contact phone number the assistant already knows), on the
-first send to a new number, and from `skills/imessage-setup/scripts/allow.ts`
-for a number allowed by hand. A shared project allocates each user their own
-`assignedPhoneNumber` out of a pool, which is the concrete reason a shared line
-cannot promise anyone a stable number.
+is registered (every contact phone number the assistant already knows) and from
+`skills/imessage-setup/scripts/allow.ts` for a number allowed by hand. A cold
+send does **not** register first — that control-plane call was blocking
+messages the plane would have delivered — and only runs if `createChat` is
+refused with the target-not-allowed error. A shared project allocates each user
+their own `assignedPhoneNumber` out of a pool, which is the concrete reason a
+shared line cannot promise anyone a stable number.
 
 **A Photon webhook's `signingSecret` is returned once** and is never
 retrievable, so a lost one means delete and re-register.

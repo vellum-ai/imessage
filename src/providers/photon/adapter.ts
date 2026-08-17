@@ -172,7 +172,8 @@ export function createPhotonProvider(
     },
 
     /**
-     * Register, or re-register when the signing secret is gone.
+     * Register, or re-register when the signing secret is gone or the stored
+     * URL is the slashless spelling.
      *
      * Photon returns the secret exactly once, at creation, and its listing
      * never carries it. So a registration that exists while this plugin holds
@@ -180,10 +181,10 @@ export function createPhotonProvider(
      * them. Deleting and recreating is the only way back to a verifiable
      * webhook, and Photon's own docs say the same.
      *
-     * Matching ignores a trailing slash — see {@link sameWebhookUrl}. Without
-     * that, a registration stored as `events-photon/` reads as a different
-     * address, so it is neither reused nor deleted: this creates a second one
-     * beside it, both deliver, and only the newer secret verifies.
+     * Matching still finds a slashless twin (`sameWebhookUrl`), but reuse
+     * requires the exact spelling. A slashless URL 301s at Vellum's managed
+     * gateway onto a trailing slash, and that redirect 404s a POST before
+     * HMAC. Recreating is what moves Photon onto the canonical URL.
      */
     async ensureWebhook(
       opts: EnsureWebhookOptions,
@@ -194,7 +195,13 @@ export function createPhotonProvider(
         (hook) => hook.webhookUrl,
       );
 
-      if (existing && opts.hasSecret) {
+      // Reuse only the exact spelling. A slashless registration is the same
+      // resource to us (`sameWebhookUrl`) but not to the managed gateway:
+      // Photon POSTs the URL it stored, Vellum 301s that to a trailing slash,
+      // and a POST that became a GET 404s before HMAC. Recreating points
+      // Photon at the canonical URL even when we already hold a secret.
+      const stored = existing?.webhookUrl?.trim();
+      if (existing && opts.hasSecret && stored === opts.url.trim()) {
         return { created: false, id: existing.id };
       }
       if (existing?.id) {
@@ -236,21 +243,15 @@ export function createPhotonProvider(
         return { id: message?.guid };
       }
 
-      // A handle with no chat resolved yet. Two things have to happen before
-      // a chat exists, and they are easy to confuse: Photon will only message
-      // people the project knows, so the recipient is registered as a user
-      // first. Skipping it fails at the message plane with "Target not allowed
-      // for this project", which sounds like a bad address rather than a
-      // provisioning step nobody took.
+      // A handle with no chat resolved yet. `createChat` is enough when the
+      // project already knows the recipient — the common case after setup,
+      // and the path a direct SDK call takes. `POST /users/` used to run
+      // first, unconditionally, and a failure there blocked the send even
+      // when the message plane would have delivered.
       //
-      // Registration is on the cold path only, and the guid cache below means
-      // that path runs once per handle — so this is not a call per message.
-      // Setup also calls this via `allowRecipient` so a first send is not the
-      // first time Photon hears the number.
-      await allowHandle(addressed);
-
-      // Then create-or-resolve the chat, carrying the opening message rather
-      // than paying two round trips.
+      // Registration is the recovery for "Target not allowed", not a
+      // prerequisite. Setup still calls `allowRecipient` so a first send is
+      // usually not the first time Photon hears the number.
       let created;
       try {
         created = await client.createChat({
@@ -259,11 +260,29 @@ export function createPhotonProvider(
           text: body,
         });
       } catch (err) {
-        // The user record was just written, so a refusal here is not the
-        // missing registration it sounds like. Ask Photon what it makes of
-        // the address and say that instead of guessing.
-        if (isTargetRefusal(err)) await explainRefusal(client, addressed, err);
-        throw err;
+        if (!isTargetRefusal(err)) throw err;
+        try {
+          await allowHandle(addressed);
+        } catch (allowErr) {
+          const refusal = err instanceof Error ? err.message : String(err);
+          const allow = allowErr instanceof Error ? allowErr.message : String(allowErr);
+          throw new Error(
+            `Photon refused ${addressed}: ${refusal}. ` +
+              `Registering that handle as a project user also failed (${allow}).`,
+          );
+        }
+        try {
+          created = await client.createChat({
+            addresses: [addressed],
+            clientMessageId: sendOpts.idempotencyKey,
+            text: body,
+          });
+        } catch (retryErr) {
+          if (isTargetRefusal(retryErr)) {
+            await explainRefusal(client, addressed, retryErr);
+          }
+          throw retryErr;
+        }
       }
       if (created.chatGuid) chatGuids.set(addressed, created.chatGuid);
 

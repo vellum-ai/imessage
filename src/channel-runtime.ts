@@ -13,6 +13,7 @@
 
 import { readSecret, storeSecret } from "./app-credentials.ts";
 import { describeError } from "./providers/error-detail.ts";
+import { allowContactRecipients } from "./channel/photon-recipients.ts";
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
 import { WEBHOOK_SECRET_FIELDS } from "./config.ts";
@@ -159,6 +160,15 @@ async function registerWebhook(
         ? "imessage: registered the inbound webhook with the provider"
         : "imessage: provider webhook already registered",
     );
+
+    // Photon will only message people the project knows. Doing this here,
+    // next to webhook registration, is what makes a credential save enough
+    // to finish setup: the restart that follows registers the webhook and
+    // allows the contacts the gateway already admits, so a setup check to
+    // the user's own number is not the first time Photon hears it.
+    if (provider.allowRecipient) {
+      await allowContactRecipients(provider, logger);
+    }
   } catch (err) {
     // Everything is inside the boundary, minting and storing included: this
     // runs un-awaited, so anything escaping is an unhandled rejection rather
@@ -323,5 +333,12 @@ export function startChannelRuntime(
     { provider: provider.id, intervalMs: config.pollIntervalMs },
     "imessage: poll worker started",
   );
+  // Webhook mode allows contacts inside `registerWebhook`. Poll mode never
+  // takes that path, and a Photon project still refuses anyone it does not
+  // know — so the same pass runs here, un-awaited, for the same reason the
+  // webhook one is: boot must not wait on the contacts list.
+  if (provider.allowRecipient) {
+    void allowContactRecipients(provider, ctx.logger);
+  }
   return { status: "running" };
 }

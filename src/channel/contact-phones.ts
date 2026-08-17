@@ -1,0 +1,138 @@
+/**
+ * Phone numbers the assistant already knows, as Photon users.
+ *
+ * A Photon project may only message people it has registered. The plugin
+ * registers a recipient on the first send, but a setup probe — and any
+ * outbound to someone who has never texted the line — still fails with
+ * "Target not allowed for this project" until they are a project user.
+ *
+ * The numbers worth registering are the ones on the assistant's contacts:
+ * those are the people the gateway will already admit. Parsing that list
+ * here, rather than asking the setup skill to re-derive it, keeps webhook
+ * registration and the allow script on the same set.
+ */
+
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+import { phoneFromAddress } from "./identity.ts";
+
+const execFileAsync = promisify(execFile);
+
+/** Channel types whose address is a phone number. */
+const PHONE_CHANNEL_TYPES = new Set(["phone", "imessage", "sms", "whatsapp"]);
+
+/** Channel statuses that mean "do not message this person". */
+const SKIP_STATUSES = new Set(["blocked", "revoked"]);
+
+/** How long to wait for `assistant contacts list` before giving up. */
+const LIST_CONTACTS_TIMEOUT_MS = 10_000;
+
+/**
+ * E.164 numbers on a contacts-list payload.
+ *
+ * Accepts both shapes the host actually emits: the HTTP/OpenAPI form
+ * (`type` + `address`) and the CLI form the contacts skill documents
+ * (`channel` + `externalUserId`). A blocked or revoked channel is skipped
+ * — Photon's user list is provisioning, not an override of the gateway ACL.
+ */
+export function phoneNumbersFromContacts(payload: unknown): string[] {
+  const contacts = contactsOf(payload);
+  const phones = new Set<string>();
+
+  for (const contact of contacts) {
+    if (!contact || typeof contact !== "object") continue;
+    const channels = (contact as { channels?: unknown }).channels;
+    if (!Array.isArray(channels)) continue;
+
+    for (const channel of channels) {
+      const phone = phoneFromChannel(channel);
+      if (phone) phones.add(phone);
+    }
+  }
+
+  return [...phones];
+}
+
+/**
+ * Load the assistant's contact phone numbers.
+ *
+ * `listJson` is the test seam. The default shells out to
+ * `assistant contacts list --json`, which is the same command the contacts
+ * skill uses — so a number this returns is a number the gateway already
+ * knows, not a second copy of the contact book.
+ */
+export async function loadContactPhoneNumbers(
+  listJson: () => Promise<unknown> = listContactsJson,
+): Promise<string[]> {
+  return phoneNumbersFromContacts(await listJson());
+}
+
+/** `assistant contacts list --json`, parsed. */
+export async function listContactsJson(): Promise<unknown> {
+  let stdout: string;
+  try {
+    const result = await execFileAsync(
+      "assistant",
+      ["contacts", "list", "--json", "--limit", "100"],
+      { timeout: LIST_CONTACTS_TIMEOUT_MS, encoding: "utf8" },
+    );
+    stdout = result.stdout;
+  } catch (err) {
+    const detail =
+      err instanceof Error
+        ? (err as { stderr?: string }).stderr?.trim() || err.message
+        : String(err);
+    throw new Error(
+      `assistant contacts list failed: ${detail.slice(0, 300)}`,
+    );
+  }
+
+  try {
+    return JSON.parse(stdout) as unknown;
+  } catch {
+    throw new Error("assistant contacts list returned a body that is not JSON");
+  }
+}
+
+function contactsOf(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  const contacts = (payload as { contacts?: unknown }).contacts;
+  return Array.isArray(contacts) ? contacts : [];
+}
+
+function phoneFromChannel(channel: unknown): string | undefined {
+  if (!channel || typeof channel !== "object") return undefined;
+  const row = channel as {
+    status?: unknown;
+    policy?: unknown;
+    type?: unknown;
+    channel?: unknown;
+    address?: unknown;
+    externalUserId?: unknown;
+    externalChatId?: unknown;
+  };
+
+  const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
+  if (SKIP_STATUSES.has(status)) return undefined;
+  if (typeof row.policy === "string" && row.policy.toLowerCase() === "deny") {
+    return undefined;
+  }
+
+  const kind =
+    typeof row.type === "string"
+      ? row.type
+      : typeof row.channel === "string"
+        ? row.channel
+        : "";
+  if (kind && !PHONE_CHANNEL_TYPES.has(kind.toLowerCase())) return undefined;
+
+  const candidates = [row.address, row.externalUserId, row.externalChatId];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const phone = phoneFromAddress(candidate);
+    if (phone) return phone;
+  }
+  return undefined;
+}

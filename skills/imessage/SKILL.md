@@ -28,7 +28,9 @@ decide.
 
 The Comms API key must be in the credential store. If a send fails with a
 missing-credential or 401 error, load the **imessage-setup** skill to walk the
-user through getting one.
+user through getting one. If Photon refuses with `Target not allowed for this
+project`, that skill's `allow.ts` script registers the number — it is a project
+recipient-policy restriction, not a credential problem.
 
 ## How to send
 

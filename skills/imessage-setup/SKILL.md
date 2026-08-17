@@ -85,7 +85,32 @@ Never put a secret in `config.json` and never paste one into chat. The plugin
 reads them from the credential store at call time, so rotating one later needs
 no restart.
 
-## 3. Confirm sending works
+## 3. Allow the people Photon may message
+
+Photon will only message numbers the project already knows. Anyone else is
+refused with `Target not allowed for this project` — a policy answer that
+reads like a bad address. The plugin registers a recipient on the first send,
+but a setup check is that first send, so it fails unless the number is allowed
+first.
+
+Storing the credentials (step 2) restarts the channel, which registers the
+webhook **and** allows every phone number already on the assistant's contacts.
+If that list was empty, unreadable, or the number you want to text is not a
+contact yet, allow it by hand:
+
+```bash
+# Every contact that already has a phone number
+bun skills/imessage-setup/scripts/allow.ts --contacts
+
+# One number — the user's own, a test recipient, someone not yet a contact
+bun skills/imessage-setup/scripts/allow.ts --to "+15551234567"
+```
+
+`--to` accepts E.164 (`+15551234567`) or a US national number; anything else
+is rejected rather than guessed at. Comms has no such restriction — skip this
+step there.
+
+## 4. Confirm sending works
 
 ```bash
 bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup check from your assistant."
@@ -93,9 +118,11 @@ bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup
 
 Have the user confirm it arrived. The script sends through the same provider
 adapter the channel uses, over whichever line `config.json` names, so this
-isolates a credential problem from an ingress problem on either provider.
+isolates a credential problem from an ingress problem on either provider. If
+Photon still answers `Target not allowed for this project`, the number was not
+allowed — go back to step 3 rather than rotating credentials.
 
-## 4. Inbound
+## 5. Inbound
 
 **Use polling.** It is the ingress that works end to end today:
 
@@ -111,7 +138,9 @@ Webhooks are preferable and the plugin registers them on every webhook-mode
 start, pointing the provider at its own route,
 `/webhooks/plugins/imessage/events-<provider>`. The public base comes from the
 host — a managed platform callback route, or a configured public ingress — so
-there is nothing to compose or configure here.
+there is nothing to compose or configure here. On Photon, that same start also
+allows the assistant's contact phone numbers (step 3); a number added as a
+contact later still needs `allow.ts`.
 
 ## Configuration
 
@@ -128,4 +157,5 @@ Optional, in the plugin's `config.json`:
 Read [`references/troubleshooting.md`](references/troubleshooting.md) when a
 step fails. It covers each symptom the two providers produce — missing
 credentials, Photon's `Target not allowed for this project`, Comms scope
-errors, and sends that succeed while nothing arrives.
+errors, and sends that succeed while nothing arrives. The Photon allow script
+is in this skill: `scripts/allow.ts`.

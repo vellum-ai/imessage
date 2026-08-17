@@ -12,11 +12,25 @@ stale secret against a current id fails the same way a wrong id does. Re-copy
 both from the dashboard rather than guessing which one drifted.
 
 **Photon: "Target not allowed for this project"** — a Photon project may only
-message people it knows, and the recipient is not one of them yet. The plugin
-registers a recipient automatically on the first send to a new number, so
-seeing this means the registration itself failed. On a shared project the usual
-cause is the project's shared-user cap; Photon's own message says which. There
-is nothing to fix on the plugin side.
+message people it knows, and the recipient is not one of them yet. This is a
+project recipient-policy restriction, not a plugin or credential problem. No
+message was sent.
+
+Allow the number, then retry the send:
+
+```bash
+bun skills/imessage-setup/scripts/allow.ts --to "+15551234567"
+```
+
+Webhook registration also allows every phone number already on the assistant's
+contacts. If the setup check is to a number that is not a contact, or the
+contacts list was empty at start, that automatic pass will not have included
+it — `--to` is the fix. `--contacts` re-runs the same pass by hand.
+
+The plugin still registers a recipient on the first send to a new number, so
+seeing this after a successful `allow.ts` means the registration itself failed.
+On a shared project the usual cause is the project's shared-user cap; Photon's
+own message says which.
 
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.

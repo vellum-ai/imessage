@@ -602,6 +602,53 @@ describe("photon provider", () => {
     });
   });
 
+  test("allowRecipient registers the handle and sends nothing", async () => {
+    // Setup has to make a number messageable without delivering a test
+    // bubble to it. A send that happens to register on the way out is how
+    // this used to work, and it is why a setup check arrived as "Target
+    // not allowed" for a number Photon had never been told about.
+    stubPhoton(() => undefined);
+
+    const result = await createPhotonProvider(fakePlane().factory).allowRecipient?.(
+      "+15166681354",
+    );
+
+    expect(result).toEqual({ phoneNumber: "+15166681354" });
+    expect(cloudPaths()).toEqual([
+      "/projects/test-key/imessage/",
+      "/projects/test-key/users/",
+    ]);
+    const registration = calls.find((c) => c.path.endsWith("/users/"));
+    expect(JSON.parse(String(registration?.init.body))).toEqual({
+      type: "shared",
+      phoneNumber: "+15166681354",
+    });
+  });
+
+  test("allowRecipient pulls the phone out of a chat guid", async () => {
+    stubPhoton(() => undefined);
+    const result = await createPhotonProvider(fakePlane().factory).allowRecipient?.(
+      "any;-;+15166681354",
+    );
+    expect(result?.phoneNumber).toBe("+15166681354");
+    const registration = calls.find((c) => c.path.endsWith("/users/"));
+    expect(JSON.parse(String(registration?.init.body)).phoneNumber).toBe(
+      "+15166681354",
+    );
+  });
+
+  test("allowRecipient refuses junk before calling Photon", async () => {
+    stubPhoton(() => undefined);
+    await expect(
+      createPhotonProvider(fakePlane().factory).allowRecipient?.("12345"),
+    ).rejects.toThrow(/not a phone number/);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("comms does not restrict recipients", () => {
+    expect(createCommsProvider().allowRecipient).toBeUndefined();
+  });
+
   test("a dedicated project with no line says so rather than failing later", async () => {
     stubPhoton((call) => {
       if (call.path.endsWith("/imessage/")) {

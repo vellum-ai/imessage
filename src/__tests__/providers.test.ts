@@ -231,8 +231,8 @@ function stubPhoton(handler: (call: FetchCall) => Response | undefined): void {
     if (call.path.includes("/imessage/tokens")) {
       return Response.json(SHARED_TOKEN);
     }
-    // A shared project, which is what a cold send reads before registering
-    // the recipient as a user.
+    // A shared project, which is what user registration reads when a cold
+    // send is refused with "Target not allowed".
     if (call.path.endsWith("/imessage/")) {
       return Response.json({ succeed: true, data: { type: "shared" } });
     }
@@ -452,10 +452,10 @@ describe("photon provider", () => {
     ]);
   });
 
-  test("a cold send registers the recipient before resolving a chat", async () => {
-    // Photon will only message people the project knows. Skipping this fails
-    // at the message plane with "Target not allowed for this project", which
-    // reads like a bad address rather than a provisioning step nobody took.
+  test("a cold send resolves a chat without registering a user first", async () => {
+    // Direct SDK createChat already delivers without POST /users/. Registering
+    // first blocked sends when that control-plane call failed, even though
+    // the message plane would have accepted the recipient.
     const plane = fakePlane((call) =>
       call.kind === "createChat"
         ? {
@@ -472,16 +472,42 @@ describe("photon provider", () => {
       { idempotencyKey: "k" },
     );
 
-    expect(cloudPaths()).toEqual([
-      "/projects/test-key/imessage/",
-      "/projects/test-key/users/",
-      "/projects/test-key/imessage/tokens",
-    ]);
+    expect(cloudPaths().some((p) => p.endsWith("/users/"))).toBe(false);
+    expect(cloudPaths()).toEqual(["/projects/test-key/imessage/tokens"]);
+    expect(plane.calls.map((c) => c.kind)).toEqual(["createChat"]);
+  });
+
+  test("a target-not-allowed refusal registers the recipient and retries", async () => {
+    let creates = 0;
+    const plane = fakePlane((call) => {
+      if (call.kind === "createChat") {
+        creates += 1;
+        if (creates === 1) {
+          throw new Error("Target not allowed for this project");
+        }
+        return {
+          chat: { guid: "any;-;+15166681354" },
+          initialMessage: photonMessage({ guid: "p2p-first" }),
+        };
+      }
+      return undefined;
+    });
+    stubPhoton(() => undefined);
+
+    const result = await createPhotonProvider(plane.factory).send(
+      { to: "+15166681354" },
+      "hi",
+      { idempotencyKey: "k" },
+    );
+
+    expect(result.id).toBe("p2p-first");
+    expect(cloudPaths().filter((p) => p.endsWith("/users/"))).toHaveLength(1);
     const registration = calls.find((c) => c.path.endsWith("/users/"));
     expect(JSON.parse(String(registration?.init.body))).toEqual({
       type: "shared",
       phoneNumber: "+15166681354",
     });
+    expect(plane.calls.filter((c) => c.kind === "createChat")).toHaveLength(2);
   });
 
   test("a refusal carries Photon's own verdict on the address", async () => {
@@ -561,7 +587,9 @@ describe("photon provider", () => {
 
   test("a dedicated project assigns the recipient to its own line", async () => {
     // A dedicated user has to name a line the project owns. The token mint
-    // already reports those, so this costs no extra call.
+    // already reports those, so this costs no extra call. Registration still
+    // runs only after the plane refuses the handle.
+    let creates = 0;
     stubPhoton((call) => {
       if (call.path.endsWith("/imessage/")) {
         return Response.json({ succeed: true, data: { type: "dedicated" } });
@@ -579,14 +607,19 @@ describe("photon provider", () => {
       }
       return undefined;
     });
-    const plane = fakePlane((call) =>
-      call.kind === "createChat"
-        ? {
-            chat: { guid: "any;-;+15166681354" },
-            initialMessage: photonMessage({ guid: "p2p-first" }),
-          }
-        : undefined,
-    );
+    const plane = fakePlane((call) => {
+      if (call.kind === "createChat") {
+        creates += 1;
+        if (creates === 1) {
+          throw new Error("Target not allowed for this project");
+        }
+        return {
+          chat: { guid: "any;-;+15166681354" },
+          initialMessage: photonMessage({ guid: "p2p-first" }),
+        };
+      }
+      return undefined;
+    });
 
     await createPhotonProvider(plane.factory).send(
       { to: "+15166681354" },
@@ -666,9 +699,15 @@ describe("photon provider", () => {
       }
       return undefined;
     });
+    const plane = fakePlane((call) => {
+      if (call.kind === "createChat") {
+        throw new Error("Target not allowed for this project");
+      }
+      return undefined;
+    });
 
     await expect(
-      createPhotonProvider(fakePlane().factory).send(
+      createPhotonProvider(plane.factory).send(
         { to: "+15166681354" },
         "hi",
         { idempotencyKey: "k" },
@@ -1115,25 +1154,39 @@ describe("webhook registration", () => {
     });
   });
 
-  test("photon reuses a registration stored with a trailing slash", async () => {
-    // Worse here than on Comms: a miss neither reuses nor deletes, so the old
-    // registration keeps delivering under a secret Photon will never reissue.
-    stubPhoton((call) =>
-      call.path.includes("/webhooks/")
-        ? Response.json({
-            succeed: true,
-            data: [{ id: "wh_p", webhookUrl: "https://host.example/mine/" }],
-          })
-        : undefined,
-    );
+  test("photon replaces a slashless registration so the vendor posts at a trailing slash", async () => {
+    // Photon stores and calls the URL it was given. A slashless one 301s at
+    // Vellum's managed gateway, and that redirect 404s the POST. Recreating
+    // even when we hold a secret is what moves the vendor onto the
+    // canonical spelling; matching still finds the old row so it is deleted
+    // rather than left delivering beside the new one.
+    stubPhoton((call) => {
+      if (!call.path.includes("/webhooks/")) return undefined;
+      if (call.init.method === "GET") {
+        return Response.json({
+          succeed: true,
+          data: [{ id: "wh_old", webhookUrl: "https://host.example/mine" }],
+        });
+      }
+      if (call.init.method === "DELETE") {
+        return Response.json({ succeed: true, data: {} });
+      }
+      return Response.json({
+        succeed: true,
+        data: { id: "wh_new", signingSecret: "s3cr3t" },
+      });
+    });
 
     expect(
       await createPhotonProvider().ensureWebhook({
-        url: "https://host.example/mine",
+        url: "https://host.example/mine/",
         hasSecret: true,
       }),
-    ).toEqual({ created: false, id: "wh_p" });
-    expect(calls).toHaveLength(1);
+    ).toEqual({ created: true, id: "wh_new", secret: "s3cr3t" });
+    expect(calls.map((c) => c.init.method)).toEqual(["GET", "DELETE", "POST"]);
+    expect(JSON.parse(String(calls[2]?.init.body))).toEqual({
+      webhookUrl: "https://host.example/mine/",
+    });
   });
 
   test("photon replaces a slashed registration when the secret is gone", async () => {

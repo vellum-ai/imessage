@@ -27,10 +27,11 @@ contacts. If the setup check is to a number that is not a contact, or the
 contacts list was empty at start, that automatic pass will not have included
 it — `--to` is the fix. `--contacts` re-runs the same pass by hand.
 
-The plugin still registers a recipient on the first send to a new number, so
-seeing this after a successful `allow.ts` means the registration itself failed.
-On a shared project the usual cause is the project's shared-user cap; Photon's
-own message says which.
+The plugin retries `POST /users/` only after a cold send is refused with this
+error, then retries the send. Seeing this after a successful `allow.ts` means
+the registration itself failed, or the plane refused for another reason. On a
+shared project the usual cause is the project's shared-user cap; Photon's own
+message says which.
 
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.
@@ -66,11 +67,12 @@ a fresh approval. An approved route whose credential is not set answers 409
 rather than 404; the listing names the credential each route reads.
 
 *The declaration is `approved` and deliveries still 404.* Check the path that
-actually arrived. The platform's callback layer redirects a slashless request
-to a trailing-slash URL, and a gateway that predates that tolerance matches the
-requested spelling against the declared `events-comms` exactly. Nothing on this
-side can avoid it — the slash is re-added downstream of whatever the plugin
-registered — so the fix is a gateway new enough to ignore it.
+actually arrived. Vellum's managed callback layer 301s a slashless POST onto
+the trailing-slash spelling, and following that redirect drops the body — the
+trailing-slash URL then 404s before HMAC. This plugin registers the
+trailing-slash URL with Photon so the vendor never walks that redirect. If an
+older registration is still slashless, restart the channel (or re-save
+credentials) so `ensureWebhook` can replace it.
 
 **Checking inbound without waiting for a text** — on Comms, `POST
 /api/v1/comms/webhooks/{id}/test` sends a signed `comms.ping` through the real

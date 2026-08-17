@@ -137,14 +137,9 @@ describe("skill send", () => {
     );
 
     expect(sent).toEqual([{ id: "p2p-first", body: "hello" }]);
-    // What is left on HTTP: read the project type, register the recipient as
-    // a user, mint a token. Photon refuses to message anyone the project does
-    // not know, so the registration is part of a cold send, not setup.
-    expect(pathsCalled()).toEqual([
-      "/projects/proj_1/imessage/",
-      "/projects/proj_1/users/",
-      "/projects/proj_1/imessage/tokens",
-    ]);
+    // What is left on HTTP: mint a token. User registration is a fallback
+    // for "Target not allowed", not a prerequisite of a cold send.
+    expect(pathsCalled()).toEqual(["/projects/proj_1/imessage/tokens"]);
     expect(planeCalls.map((c) => c.kind)).toEqual(["createChat"]);
   });
 
@@ -162,9 +157,9 @@ describe("skill send", () => {
     expect(planeCalls.filter((c) => c.kind === "sendText")).toHaveLength(
       sent.length - 1,
     );
-    // The recipient is registered once, and the token minted once, however
-    // many bubbles the reply becomes.
-    expect(pathsCalled().filter((p) => p.endsWith("/users/"))).toHaveLength(1);
+    // The token is minted once, however many bubbles the reply becomes, and
+    // a successful cold send never pays a /users/ round trip.
+    expect(pathsCalled().filter((p) => p.endsWith("/users/"))).toHaveLength(0);
     expect(
       pathsCalled().filter((p) => p.endsWith("/imessage/tokens")),
     ).toHaveLength(1);

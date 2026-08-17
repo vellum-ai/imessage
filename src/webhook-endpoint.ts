@@ -113,22 +113,34 @@ function endpointFromConfig(provider: ProviderId): WebhookEndpoint {
 
   return {
     ok: true,
-    url: `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${ingressRoutePath(provider)}`,
+    url: `${base.trim().replace(/\/+$/, "")}/webhooks/plugins/${CHANNEL_ID}/${ingressRoutePath(provider)}/`,
   };
 }
 
 /**
- * Drop a trailing slash the host may have handed back.
- *
- * The platform's callback registration appends one, and a provider delivers to
- * the URL it was given verbatim — `events-comms/`, which the gateway matches
- * against the declared `events-comms`. Newer hosts trim it themselves; this
- * keeps a registration correct against one that does not, since the URL is
- * stored on the provider's side and outlives the host version that produced it.
+ * Drop a trailing slash so two spellings of the same path compare equal.
  */
 function withoutTrailingSlash(url: string): string {
   if (url.includes("?") || url.includes("#")) return url;
   return url.replace(/\/+$/, "");
+}
+
+/**
+ * The URL a provider should POST deliveries to.
+ *
+ * Vellum's managed callback layer is Django: a slashless path 301s onto the
+ * trailing-slash spelling, and following that redirect turns a POST into a
+ * GET with no body — which then 404s, before HMAC or the plugin ever run.
+ * Registering the trailing-slash URL is what makes Photon (and Comms) POST
+ * at the canonical path instead of walking that redirect.
+ *
+ * The gateway already serves both spellings (`findDeclaredRoute` ignores one
+ * trailing slash). Query-bearing URLs are left alone so this cannot cut into
+ * a query string.
+ */
+function withTrailingSlash(url: string): string {
+  if (url.includes("?") || url.includes("#")) return url;
+  return `${url.replace(/\/+$/, "")}/`;
 }
 
 /**
@@ -206,7 +218,7 @@ export async function resolveWebhookEndpoint(
       path: ingressRoutePath(provider),
       sourceIdentifier: `iMessage (${provider})`,
     });
-    return { ok: true, url: withoutTrailingSlash(url) };
+    return { ok: true, url: withTrailingSlash(url) };
   } catch (err) {
     // No ingress and no platform connection is a real answer, not a failure
     // to handle: there is no URL that would work, and registering a plausible

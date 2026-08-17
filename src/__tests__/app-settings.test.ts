@@ -93,6 +93,11 @@ describe("applyConfigUpdate", () => {
     expect(view.ingressMode).toBe("poll");
     expect(readConfigView(configPath).ingressMode).toBe("poll");
   });
+
+  test("accepts live ingress", () => {
+    const view = applyConfigUpdate(configPath, { ingressMode: "live" });
+    expect(view.ingressMode).toBe("live");
+  });
 });
 
 describe("ConfigUpdateSchema", () => {

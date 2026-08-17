@@ -52,6 +52,7 @@ empty body to anything else, including a bodiless `GET /`. Its REST routes are
 real but belong to `imessage-server-v2-http`, a middleware Photon publishes as
 software rather than hosting, so reaching the hosted plane means the vendor SDK.
 `src/providers/photon/message-client.ts` is the only file that imports it.
+Send, listing, and the live inbound stream all share that one gRPC channel.
 
 **A Photon project may only message people it knows.** Anyone else is refused
 at the message plane with `Target not allowed for this project`, which reads

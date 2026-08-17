@@ -5,12 +5,13 @@
  * the provider to normalize a delivery; the provider route reaches the runtime
  * to restart ingress live; `shutdown` stops the worker.
  *
- * Nothing durable lives here — the poll cursor is the only persistent state
- * and it belongs to `cursor.ts`.
+ * Nothing durable lives here — the poll cursor and live seen-ids are the
+ * persistent state, and they belong to `cursor.ts` and `live-ingress.ts`.
  */
 
 import type { PluginChannelProvider } from "./channel/contract.ts";
 import type { IMessageConfig } from "./config.ts";
+import type { LiveIngress } from "./live-ingress.ts";
 import type { MessagingProvider } from "./providers/types.ts";
 import type { PollWorkerSupervisor } from "./worker/supervisor.ts";
 
@@ -98,6 +99,7 @@ interface PluginState {
   provider?: MessagingProvider;
   channel?: PluginChannelProvider;
   supervisor?: PollWorkerSupervisor;
+  liveIngress?: LiveIngress;
   webhook?: WebhookRegistrationReport;
   probe?: InboundProbeReport;
 }
@@ -146,6 +148,14 @@ export function getSupervisor(): PollWorkerSupervisor | undefined {
   return state.supervisor;
 }
 
+export function setLiveIngress(ingress: LiveIngress | undefined): void {
+  state.liveIngress = ingress;
+}
+
+export function getLiveIngress(): LiveIngress | undefined {
+  return state.liveIngress;
+}
+
 export function setWebhookReport(report: WebhookRegistrationReport): void {
   state.webhook = report;
 }
@@ -173,6 +183,7 @@ export function resetPluginState(): void {
   state.provider = undefined;
   state.channel = undefined;
   state.supervisor = undefined;
+  state.liveIngress = undefined;
   state.webhook = undefined;
   state.probe = undefined;
 }

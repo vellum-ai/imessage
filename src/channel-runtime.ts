@@ -17,21 +17,25 @@ import { allowContactRecipients } from "./channel/photon-recipients.ts";
 import { buildChannelProvider } from "./channel/provider.ts";
 import type { IMessageConfig } from "./config.ts";
 import { WEBHOOK_SECRET_FIELDS } from "./config.ts";
+import { LiveIngress } from "./live-ingress.ts";
 import type { RuntimeContext } from "./plugin-state.ts";
 import {
   getInitContext,
   getProvider,
   getSupervisor,
+  getLiveIngress,
   setChannel,
   setConfig,
   setWebhookReport,
   type WebhookRegistrationStep,
   setProvider,
   setSupervisor,
+  setLiveIngress,
 } from "./plugin-state.ts";
 import { pluginDataDir, pluginName } from "./plugin-paths.ts";
 import { resolveProvider } from "./providers/index.ts";
 import type { MessagingProvider } from "./providers/types.ts";
+import { runTurnForDelivery } from "./run-turn.ts";
 import {
   ingressRoutePath,
   resolveWebhookEndpoint,
@@ -127,7 +131,7 @@ async function registerWebhook(
       });
       logger.warn(
         { provider: provider.id, step, reason: endpoint.reason },
-        "imessage: no webhook could be registered — inbound will not arrive until the assistant has a public URL or ingressMode is 'poll'",
+        "imessage: no webhook could be registered — inbound will not arrive until the assistant has a public URL or ingressMode is 'live' or 'poll'",
       );
       return;
     }
@@ -184,6 +188,8 @@ async function registerWebhook(
 export function stopIngress(): void {
   getSupervisor()?.stop();
   setSupervisor(undefined);
+  getLiveIngress()?.stop();
+  setLiveIngress(undefined);
 }
 
 /**
@@ -287,6 +293,51 @@ export function startChannelRuntime(
     // it. A failure leaves the channel running — outbound still works, and
     // inbound was not going to arrive either way.
     void registerWebhook(provider, ctx.logger);
+    return { status: "running" };
+  }
+
+  if (config.ingressMode === "live") {
+    if (!provider.supportsLive || !provider.subscribeInbound) {
+      const idleReason = `provider ${provider.id} does not support live ingress`;
+      ctx.logger.warn({ provider: provider.id }, `imessage: ${idleReason}`);
+      return { status: "idle", idleReason };
+    }
+
+    const live = new LiveIngress({
+      provider,
+      storageDir: ctx.pluginStorageDir,
+      logger: ctx.logger,
+      sink: async (event) => {
+        // Live events arrive on the gRPC stream this process already holds,
+        // so they never pass through the gateway's webhook admission
+        // pipeline. The turn runs here the same way a webhook delivery does
+        // after the gateway has forwarded it.
+        try {
+          await runTurnForDelivery({ event, provider });
+        } catch (err) {
+          ctx.logger.warn(
+            {
+              err,
+              actorExternalId: event.actor.actorExternalId,
+              conversationExternalId: event.message.conversationExternalId,
+              externalMessageId: event.message.externalMessageId,
+            },
+            "imessage: live inbound turn failed",
+          );
+        }
+      },
+    });
+
+    live.start();
+    setLiveIngress(live);
+
+    ctx.logger.info(
+      { provider: provider.id },
+      "imessage: live ingress — inbound arrives on the provider's gRPC stream",
+    );
+    if (provider.allowRecipient) {
+      void allowContactRecipients(provider, ctx.logger);
+    }
     return { status: "running" };
   }
 

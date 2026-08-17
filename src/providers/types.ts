@@ -1,9 +1,10 @@
 /**
  * The provider seam.
  *
- * Everything above this interface — the poller, the transport, the webhook
- * route — is provider-agnostic and must stay that way. Only the adapters under
- * `src/providers/<id>/` know what a provider's payloads look like.
+ * Everything above this interface — the poller, the live ingress, the
+ * transport, the webhook route — is provider-agnostic and must stay that way.
+ * Only the adapters under `src/providers/<id>/` know what a provider's
+ * payloads look like.
  *
  * Two providers, both bring-your-own — the user holds the account and the
  * billing either way:
@@ -72,6 +73,15 @@ export interface SendResult {
   id?: string;
 }
 
+/**
+ * One live-stream session. Async-iterable, and abortable so shutdown does not
+ * sit waiting for the next event.
+ */
+export interface LiveInboundSubscription {
+  [Symbol.asyncIterator](): AsyncIterator<InboundRecord>;
+  close(): void | Promise<void>;
+}
+
 export interface EnsureWebhookOptions {
   /** Absolute URL the provider should deliver to. */
   url: string;
@@ -104,8 +114,8 @@ export interface WebhookRegistration {
  * What a provider must implement to back this channel.
  *
  * Deliberately small. A provider that only supports webhooks can throw from
- * `fetchInbound`; `supportsPolling` lets the host pick a working ingress mode
- * instead of finding out at runtime.
+ * `fetchInbound`; `supportsPolling` and `supportsLive` let the host pick a
+ * working ingress mode instead of finding out at runtime.
  */
 export interface MessagingProvider {
   readonly id: ProviderId;
@@ -113,6 +123,14 @@ export interface MessagingProvider {
   readonly label: string;
   /** Whether `fetchInbound` is usable on this provider. */
   readonly supportsPolling: boolean;
+  /**
+   * Whether `subscribeInbound` is usable on this provider.
+   *
+   * Photon holds a long-lived gRPC stream on the message plane and can push
+   * inbound events over it. Comms has no such connection, so live ingress is
+   * Photon-only.
+   */
+  readonly supportsLive: boolean;
 
   /**
    * Confirm the provider is configured and reachable.
@@ -123,6 +141,17 @@ export interface MessagingProvider {
   checkReadiness(): Promise<{ ready: true } | { ready: false; reason: string }>;
 
   fetchInbound(opts: FetchInboundOptions): Promise<InboundRecord[]>;
+
+  /**
+   * Subscribe to inbound records on a long-lived connection.
+   *
+   * The iterator ends when the connection drops; the live ingress reconnects.
+   * `close` aborts the current stream so a shutdown does not wait on the next
+   * event. Optional because a provider with no live plane has nothing to
+   * subscribe to — Comms omits it, Photon implements it on the gRPC channel
+   * it already holds for send.
+   */
+  subscribeInbound?(): LiveInboundSubscription;
 
   /**
    * Point the provider's webhook at `opts.url`, if it is not already.

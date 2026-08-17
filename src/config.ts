@@ -111,10 +111,15 @@ export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
  * gateway, so the route only ever sees deliveries the gateway already
  * authenticated.
  *
+ * `live` holds the provider's long-lived connection and reads inbound off it.
+ * Photon already has that connection (gRPC, the same channel send uses), so
+ * this needs no public URL and no webhook secret. Comms has no such plane.
+ *
  * `poll` exists for deployments whose gateway is not reachable from the
- * internet. It only works on providers that support it.
+ * internet and whose provider has no live stream. It only works on providers
+ * that support it.
  */
-export const INGRESS_MODES = ["webhook", "poll"] as const;
+export const INGRESS_MODES = ["webhook", "poll", "live"] as const;
 export type IngressMode = (typeof INGRESS_MODES)[number];
 
 /** Bounds on the poll interval. Comms rate-limits with 429. */
@@ -132,7 +137,7 @@ export const IMessageConfigSchema = z.object({
     .enum(INGRESS_MODES)
     .default("webhook")
     .describe(
-      "How inbound messages arrive: 'webhook' (default) or 'poll' for deployments with no public ingress.",
+      "How inbound messages arrive: 'webhook' (default), 'live' (Photon's gRPC stream, no public URL), or 'poll' for deployments with no public ingress.",
     ),
   pollIntervalMs: z
     .number()

@@ -19,6 +19,7 @@ import type {
   EnsureWebhookOptions,
   FetchInboundOptions,
   InboundRecord,
+  LiveInboundSubscription,
   MessagingProvider,
   SendResult,
   SendTarget,
@@ -131,6 +132,7 @@ export function createPhotonProvider(
     id: "photon",
     label: "Photon (your own project)",
     supportsPolling: true,
+    supportsLive: true,
 
     /**
      * Both credentials plus a live control-plane call.
@@ -169,6 +171,37 @@ export function createPhotonProvider(
         // provider-agnostic: it never sees a Photon-shaped payload.
         event: normalizePhotonMessage(message, new Date().toISOString()),
       }));
+    },
+
+    /**
+     * Inbound over the gRPC channel this adapter already holds for send.
+     *
+     * Only `message.received` is yielded. Reads, edits, and tapbacks are
+     * skipped here rather than turned into empty records: they are not turns
+     * and they are not going to reappear as `message.received` later, so
+     * there is nothing to dedupe. A received message that is not a turn
+     * (ours, a tapback, no text) still yields a record so the live ingress
+     * can remember its id.
+     */
+    subscribeInbound(): LiveInboundSubscription {
+      const stream = client.subscribeEvents();
+      const records = (async function* (): AsyncGenerator<InboundRecord> {
+        for await (const liveEvent of stream) {
+          const message = liveEvent.message;
+          if (liveEvent.type !== "message.received" || !message) {
+            continue;
+          }
+          yield {
+            id: message.guid,
+            createdAt: message.dateCreated.toISOString(),
+            event: normalizePhotonMessage(message, new Date().toISOString()),
+          };
+        }
+      })();
+      return {
+        [Symbol.asyncIterator]: () => records,
+        close: () => stream.close(),
+      };
     },
 
     /**

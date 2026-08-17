@@ -27,6 +27,7 @@ function stubProvider(send?: () => Promise<SendResult>): {
     id: "comms",
     label: "stub",
     supportsPolling: true,
+    supportsLive: false,
     async checkReadiness() {
       return { ready: true };
     },

@@ -106,6 +106,27 @@ describe("startChannelRuntime", () => {
     expect(getChannel()?.channel).toBe("imessage");
   });
 
+  test("live ingress comes up running on photon", () => {
+    withContext();
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ ingressMode: "live" }),
+    );
+
+    expect(result.status).toBe("running");
+    expect(result.idleReason).toBeUndefined();
+    expect(getProvider()?.id).toBe("photon");
+  });
+
+  test("comms plus live leaves the channel idle", () => {
+    withContext();
+    const result = startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "live" }),
+    );
+
+    expect(result.status).toBe("idle");
+    expect(result.idleReason).toContain("does not support live ingress");
+  });
+
   test("is idempotent", () => {
     withContext();
     const config = IMessageConfigSchema.parse({ ingressMode: "webhook" });
@@ -201,6 +222,16 @@ describe("webhook registration reporting", () => {
     withContext();
     startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "poll" }),
+    );
+    await settle();
+
+    expect(getWebhookReport()).toBeUndefined();
+  });
+
+  test("attempts nothing in live mode", async () => {
+    withContext();
+    startChannelRuntime(
+      IMessageConfigSchema.parse({ provider: "photon", ingressMode: "live" }),
     );
     await settle();
 

@@ -83,11 +83,11 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
  * Display copy for each ingress mode. Which ones exist comes from the plugin,
  * the same way the provider list does; this only says how to describe them.
  *
- * Webhook is the default and the one to use: the provider pushes, so a text
- * becomes a turn in about a second. Polling exists for a deployment the
- * provider cannot reach — no tunnel, no public ingress URL — where a webhook
- * would be registered against a URL that answers nothing. Without this control
- * such a deployment had no way off the default from here.
+ * Webhook is the default and the one to use when the provider can reach this
+ * assistant: the provider pushes, so a text becomes a turn in about a second.
+ * Live connection is Photon's other push path, over the gRPC channel send
+ * already uses, and needs no public URL. Polling exists for a deployment the
+ * provider cannot reach and that is not Photon.
  *
  * `pollIntervalMs` is deliberately absent. It is bounded in the config schema,
  * its default is right for both providers' rate limits, and someone who
@@ -99,6 +99,11 @@ const INGRESS_MODE_CATALOG = [
     id: "webhook",
     label: "Webhook (recommended)",
     note: "The provider delivers each message as it arrives. Needs a public ingress URL the provider can reach.",
+  },
+  {
+    id: "live",
+    label: "Live connection (Photon)",
+    note: "Holds Photon's gRPC stream and receives each message as it arrives. No public URL needed. Photon only.",
   },
   {
     id: "poll",
@@ -399,13 +404,19 @@ function App(): React.ReactElement {
     [settings],
   );
 
-  /** Ingress modes the plugin offers, in catalog order. */
+  /** Ingress modes the plugin offers, in catalog order. Live is Photon-only. */
   const ingressOptions = useMemo(
     () =>
-      INGRESS_MODE_CATALOG.filter((mode) =>
-        (settings?.ingressModes ?? []).includes(mode.id),
-      ),
-    [settings],
+      INGRESS_MODE_CATALOG.filter((mode) => {
+        if (!(settings?.ingressModes ?? []).includes(mode.id)) {
+          return false;
+        }
+        if (mode.id === "live" && draftProvider !== "photon") {
+          return false;
+        }
+        return true;
+      }),
+    [draftProvider, settings],
   );
 
   const catalog = draftProvider ? KNOWN_PROVIDERS.get(draftProvider) : undefined;
@@ -540,8 +551,12 @@ function App(): React.ReactElement {
               value={draftProvider}
               disabled={saving}
               onChange={(event) => {
-                setDraftProvider(event.target.value);
+                const next = event.target.value;
+                setDraftProvider(next);
                 setDrafts({});
+                if (next !== "photon" && draftIngress === "live") {
+                  setDraftIngress("webhook");
+                }
               }}
             >
               {options.map((option) => (

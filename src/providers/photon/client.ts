@@ -41,10 +41,12 @@ import { describeApiFailure, describeError } from "../error-detail.ts";
 import type {
   AddressReport,
   CreateChatInput,
+  EventStream,
   ListRecentInput,
   MessageClient,
   MessageClientFactory,
   MessageListPage,
+  PhotonLiveEvent,
   PhotonMessage,
   SendTextInput,
 } from "./message-client.ts";
@@ -281,6 +283,16 @@ export class PhotonClient {
   /** Recent messages on the line, newest-first, bounded by `after`. */
   async listRecent(input: ListRecentInput): Promise<MessageListPage> {
     return this.plane().listRecent(input);
+  }
+
+  /**
+   * Live message events on the gRPC channel this client already holds.
+   *
+   * The same connection send uses. Opening a second one just to subscribe
+   * would be a second keepalive and a second token, for nothing.
+   */
+  subscribeEvents(): EventStream<PhotonLiveEvent> {
+    return this.plane().subscribeEvents();
   }
 
   /** What Photon makes of an address. Diagnostic only — see the seam. */

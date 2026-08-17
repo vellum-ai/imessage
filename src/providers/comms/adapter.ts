@@ -36,6 +36,7 @@ export function createCommsProvider(): MessagingProvider {
     id: "comms",
     label: "Comms by Osis (your own account)",
     supportsPolling: true,
+    supportsLive: false,
 
     async checkReadiness() {
       try {

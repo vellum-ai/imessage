@@ -68,6 +68,7 @@ function stubProvider(
     id: "comms",
     label: "stub",
     supportsPolling: true,
+    supportsLive: false,
     async checkReadiness() {
       return { ready: true };
     },

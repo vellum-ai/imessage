@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { normalizeHandle, resolveIdentity } from "../channel/identity.ts";
+import {
+  normalizeHandle,
+  phoneFromAddress,
+  resolveIdentity,
+} from "../channel/identity.ts";
 
 describe("normalizeHandle", () => {
   test("passes through E.164", () => {
@@ -62,6 +66,32 @@ describe("normalizeHandle", () => {
     expect(normalizeHandle("")).toBeUndefined();
     expect(normalizeHandle("   ")).toBeUndefined();
     expect(normalizeHandle("call me")).toBeUndefined();
+  });
+});
+
+describe("phoneFromAddress", () => {
+  test("passes through E.164", () => {
+    expect(phoneFromAddress("+15551234567")).toBe("+15551234567");
+  });
+
+  test("pulls the handle out of a Photon chat guid", () => {
+    // Photon keys a 1:1 as `any;-;+15551234567`. The user API wants the
+    // phone, and posting the guid is a 422 that reads like a bad address.
+    expect(phoneFromAddress("any;-;+15551234567")).toBe("+15551234567");
+  });
+
+  test("normalizes a national number the way inbound does", () => {
+    expect(phoneFromAddress("(555) 123-4567")).toBe("+15551234567");
+  });
+
+  test("drops an email-style Apple ID rather than posting it as a phone", () => {
+    expect(phoneFromAddress("person@icloud.com")).toBeUndefined();
+  });
+
+  test("rejects junk", () => {
+    expect(phoneFromAddress(undefined)).toBeUndefined();
+    expect(phoneFromAddress("call me")).toBeUndefined();
+    expect(phoneFromAddress("any;-;not-a-phone")).toBeUndefined();
   });
 });
 

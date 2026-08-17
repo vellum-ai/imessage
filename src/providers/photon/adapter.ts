@@ -25,7 +25,7 @@ import type {
   WebhookDelivery,
   WebhookRegistration,
 } from "../types.ts";
-import type { PluginInboundEvent } from "../../channel/contract.ts";
+import { phoneFromAddress } from "../../channel/identity.ts";
 import { pickWebhookRegistration } from "../../webhook-endpoint.ts";
 
 /** A chat guid, as opposed to a handle we would have to resolve one for. */
@@ -106,6 +106,26 @@ export function createPhotonProvider(
    * surfaces immediately as a failed send rather than as a silent misdelivery.
    */
   const chatGuids = new Map<string, string>();
+
+  /**
+   * Register a handle as a Photon user, or throw with what to type instead.
+   *
+   * Shared by the public `allowRecipient` and the cold-send path so a number
+   * allowed during setup and a number first seen on send go through the same
+   * call. Chat guids are reduced to the phone they carry: Photon's user API
+   * wants E.164, and posting the guid is a 422 that reads like a bad address.
+   */
+  async function allowHandle(handle: string): Promise<string> {
+    const phone = phoneFromAddress(handle);
+    if (!phone) {
+      throw new Error(
+        `"${handle}" is not a phone number Photon can allow. ` +
+          "Use E.164, e.g. +15551234567.",
+      );
+    }
+    await client.ensureUser(phone);
+    return phone;
+  }
 
   return {
     id: "photon",
@@ -225,7 +245,9 @@ export function createPhotonProvider(
       //
       // Registration is on the cold path only, and the guid cache below means
       // that path runs once per handle — so this is not a call per message.
-      await client.ensureUser(addressed);
+      // Setup also calls this via `allowRecipient` so a first send is not the
+      // first time Photon hears the number.
+      await allowHandle(addressed);
 
       // Then create-or-resolve the chat, carrying the opening message rather
       // than paying two round trips.
@@ -265,6 +287,10 @@ export function createPhotonProvider(
 
     classifyWebhook(raw: unknown, receivedAt: string): WebhookDelivery {
       return classifyPhotonWebhook(raw, receivedAt);
+    },
+
+    async allowRecipient(handle: string): Promise<{ phoneNumber: string }> {
+      return { phoneNumber: await allowHandle(handle) };
     },
 
     async close(): Promise<void> {

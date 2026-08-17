@@ -56,8 +56,10 @@ software rather than hosting, so reaching the hosted plane means the vendor SDK.
 **A Photon project may only message people it knows.** Anyone else is refused
 at the message plane with `Target not allowed for this project`, which reads
 like a bad address but is a policy answer. `POST /projects/{id}/users/`
-registers a recipient; it is idempotent, and the plugin calls it on the first
-send to a new number. A shared project allocates each user their own
+registers a recipient; it is idempotent. The plugin calls it when the webhook
+is registered (every contact phone number the assistant already knows), on the
+first send to a new number, and from `skills/imessage-setup/scripts/allow.ts`
+for a number allowed by hand. A shared project allocates each user their own
 `assignedPhoneNumber` out of a pool, which is the concrete reason a shared line
 cannot promise anyone a stable number.
 

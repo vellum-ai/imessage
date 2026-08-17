@@ -76,6 +76,25 @@ export function normalizeHandle(raw: string | undefined): string | undefined {
   return `+${digits}`;
 }
 
+/**
+ * A phone number this channel can address, pulled from a handle or a chat guid.
+ *
+ * Photon keys a 1:1 chat as `any;-;+15551234567`. Setup and the allow script
+ * both see that spelling as often as a bare E.164, and Photon's user API
+ * wants the phone, not the guid. Email-style Apple IDs are not a Photon user
+ * and are dropped rather than posted as a phone number.
+ */
+export function phoneFromAddress(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  const handle = trimmed.includes(";")
+    ? (trimmed.split(";").at(-1) ?? "")
+    : trimmed;
+  const normalized = normalizeHandle(handle);
+  if (!normalized || normalized.includes("@")) return undefined;
+  return normalized;
+}
+
 function isPlausibleEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }

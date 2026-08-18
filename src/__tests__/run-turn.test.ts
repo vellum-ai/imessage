@@ -24,10 +24,15 @@ mock.module("@vellumai/plugin-api", () => ({
 const { runTurnForDelivery } = await import("../run-turn.ts");
 
 const sends: { target: unknown; body: string; key: string }[] = [];
+const typing: boolean[] = [];
 const provider = {
   send: (target: unknown, body: string, opts: { idempotencyKey: string }) => {
     sends.push({ target, body, key: opts.idempotencyKey });
     return Promise.resolve({ ok: true });
+  },
+  setTyping: (_target: unknown, isTyping: boolean) => {
+    typing.push(isTyping);
+    return Promise.resolve();
   },
 } as never;
 
@@ -50,6 +55,7 @@ function delivery() {
 beforeEach(() => {
   turns.length = 0;
   sends.length = 0;
+  typing.length = 0;
   turnResult = {
     conversationId: "conv-1",
     content: [{ type: "text", text: "hi back" }],
@@ -101,6 +107,63 @@ describe("runTurnForDelivery", () => {
     ]);
   });
 
+  test("sends only the trailing text after tool calls", async () => {
+    // Intermediate narration and tool_use blocks are not an iMessage reply.
+    turnResult = {
+      conversationId: "conv-1",
+      content: [
+        { type: "text", text: "let me check the live plugin list." },
+        { type: "tool_use" },
+        { type: "text", text: "You have three plugins enabled." },
+      ],
+    };
+
+    await runTurnForDelivery({ event: delivery(), provider });
+
+    expect(sends.map((send) => send.body)).toEqual([
+      "You have three plugins enabled.",
+    ]);
+  });
+
+  test("does not forward leaked tool-call dumps as SMS", async () => {
+    turnResult = {
+      conversationId: "conv-1",
+      content: [
+        {
+          type: "text",
+          text: [
+            "let me check the live plugin list.",
+            "to=bash code:",
+            "assistant plugins list && assistant plugins --help",
+            "to=functions.bash code:",
+            '{"command":"assistant plugins list","timeout_seconds":120}',
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const result = await runTurnForDelivery({ event: delivery(), provider });
+
+    expect(result.replied).toBe(false);
+    expect(sends).toEqual([]);
+  });
+
+  test("shows typing before the turn and clears it after", async () => {
+    await runTurnForDelivery({ event: delivery(), provider });
+
+    expect(typing).toEqual([true, false]);
+  });
+
+  test("clears typing when the turn was queued", async () => {
+    turnResult = { conversationId: "conv-1", queued: true, content: [] };
+
+    const result = await runTurnForDelivery({ event: delivery(), provider });
+
+    expect(result.replied).toBe(false);
+    expect(sends).toEqual([]);
+    expect(typing).toEqual([true, false]);
+  });
+
   test("sends nothing when the turn was queued", async () => {
     // The assistant is mid-turn and answers when it drains. Sending now would
     // put an empty message in the thread.
@@ -119,5 +182,22 @@ describe("runTurnForDelivery", () => {
 
     expect(result.replied).toBe(false);
     expect(sends).toEqual([]);
+  });
+
+  test("splits a long final reply across messages", async () => {
+    const long = "Sentence number one. ".repeat(200);
+    turnResult = {
+      conversationId: "conv-1",
+      content: [{ type: "text", text: long }],
+    };
+
+    await runTurnForDelivery({ event: delivery(), provider });
+
+    expect(sends.length).toBeGreaterThan(1);
+    expect(sends[0]?.key).toBe("reply:msg-1");
+    expect(sends[1]?.key).toBe("reply:msg-1:1");
+    expect(sends.map((send) => send.body).join(" ")).toContain(
+      "Sentence number one.",
+    );
   });
 });

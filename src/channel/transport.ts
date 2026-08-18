@@ -63,6 +63,23 @@ export function createTransport(
 
       return { ok: true, externalMessageId: lastId };
     },
+
+    async sendTyping(
+      conversationExternalId: string,
+    ): Promise<PluginDeliveryResult> {
+      if (!provider.setTyping) {
+        return { ok: true };
+      }
+      try {
+        await provider.setTyping(targetFor(conversationExternalId), true);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
   };
 }
 

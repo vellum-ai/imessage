@@ -21,8 +21,10 @@ interface RecordedSend {
 function stubProvider(send?: () => Promise<SendResult>): {
   provider: MessagingProvider;
   sends: RecordedSend[];
+  typing: boolean[];
 } {
   const sends: RecordedSend[] = [];
+  const typing: boolean[] = [];
   const provider: MessagingProvider = {
     id: "comms",
     label: "stub",
@@ -41,11 +43,14 @@ function stubProvider(send?: () => Promise<SendResult>): {
       sends.push({ target, body, idempotencyKey: opts.idempotencyKey });
       return send ? await send() : { id: "msg_out" };
     },
+    async setTyping(_target, isTyping) {
+      typing.push(isTyping);
+    },
     classifyWebhook() {
       return { kind: "ignored" as const, reason: "stub" };
     },
   };
-  return { provider, sends };
+  return { provider, sends, typing };
 }
 
 describe("targetFor", () => {
@@ -218,5 +223,15 @@ describe("transport.deliver", () => {
     await createTransport(guarded).deliver("conv_abc", { text: "hi" });
 
     expect(sends[0]?.body).toBe("hi");
+  });
+});
+
+describe("transport.sendTyping", () => {
+  test("starts the provider typing indicator", async () => {
+    const { provider, typing } = stubProvider();
+    const result = await createTransport(provider).sendTyping?.("any;-;+15551234567");
+
+    expect(result?.ok).toBe(true);
+    expect(typing).toEqual([true]);
   });
 });

@@ -300,6 +300,11 @@ export class PhotonClient {
     return this.plane().describeAddress(address);
   }
 
+  /** Start or stop the typing indicator in a chat Photon already knows. */
+  async setTyping(chatGuid: string, isTyping: boolean): Promise<void> {
+    await this.plane().setTyping(chatGuid, isTyping);
+  }
+
   /**
    * Release the message-plane channel.
    *

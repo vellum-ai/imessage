@@ -280,7 +280,8 @@ interface PlaneCall {
     | "createChat"
     | "listRecent"
     | "describeAddress"
-    | "subscribeEvents";
+    | "subscribeEvents"
+    | "setTyping";
   input: Record<string, unknown>;
 }
 
@@ -335,6 +336,10 @@ function fakePlane(
       await opts.token();
       record("describeAddress", { address });
       return addressReport ?? { address, country: "US", services: ["iMessage"] };
+    },
+    async setTyping(chatGuid, isTyping) {
+      await opts.token();
+      record("setTyping", { chatGuid, isTyping });
     },
     async close() {
       closes++;
@@ -607,6 +612,65 @@ describe("photon provider", () => {
     );
 
     expect(cloudPaths().some((p) => p.endsWith("/users/"))).toBe(false);
+  });
+
+  test("typing uses a chat guid without creating a chat", async () => {
+    const plane = fakePlane();
+    stubPhoton(() => undefined);
+    const provider = createPhotonProvider(plane.factory);
+
+    await provider.setTyping?.(
+      { conversationId: "any;-;+15551234567" },
+      true,
+    );
+    await provider.setTyping?.(
+      { conversationId: "any;-;+15551234567" },
+      false,
+    );
+
+    expect(plane.calls.filter((c) => c.kind === "setTyping")).toEqual([
+      {
+        kind: "setTyping",
+        input: { chatGuid: "any;-;+15551234567", isTyping: true },
+      },
+      {
+        kind: "setTyping",
+        input: { chatGuid: "any;-;+15551234567", isTyping: false },
+      },
+    ]);
+  });
+
+  test("typing with a guid in `to` still reaches the plane", async () => {
+    // Live turns address the chat as `{ to: conversationExternalId }`, and
+    // Photon live events carry a chat guid there.
+    const plane = fakePlane();
+    stubPhoton(() => undefined);
+
+    await createPhotonProvider(plane.factory).setTyping?.(
+      { to: "any;-;+15551234567" },
+      true,
+    );
+
+    expect(plane.calls.filter((c) => c.kind === "setTyping")).toEqual([
+      {
+        kind: "setTyping",
+        input: { chatGuid: "any;-;+15551234567", isTyping: true },
+      },
+    ]);
+  });
+
+  test("typing on an unknown handle creates nothing", async () => {
+    // Dots in a chat Photon has never seen would force a createChat, which
+    // is a send's job. Stay quiet until a guid exists.
+    const plane = fakePlane();
+    stubPhoton(() => undefined);
+
+    await createPhotonProvider(plane.factory).setTyping?.(
+      { to: "+15551234567" },
+      true,
+    );
+
+    expect(plane.calls).toEqual([]);
   });
 
   test("a dedicated project assigns the recipient to its own line", async () => {

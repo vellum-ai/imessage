@@ -173,6 +173,18 @@ export interface MessagingProvider {
   ): Promise<SendResult>;
 
   /**
+   * Start or stop the iMessage typing indicator in a chat.
+   *
+   * Photon exposes this on the message plane (`chats.setTyping`). It is
+   * transient, so a turn that started it must stop it when the reply goes
+   * out or the turn fails. Optional because Comms has no equivalent.
+   *
+   * Best-effort: a missing chat guid is a no-op rather than a create, so
+   * typing never becomes the first time Photon hears a number.
+   */
+  setTyping?(target: SendTarget, isTyping: boolean): Promise<void>;
+
+  /**
    * Make a handle messageable without sending anything.
    *
    * Photon will only message people the project knows. A cold send registers

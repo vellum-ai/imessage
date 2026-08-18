@@ -256,6 +256,20 @@ export function createPhotonProvider(
      * `x-idempotency-key` header, so a retry after a timeout does not deliver
      * twice — on a real phone line the recipient sees both.
      */
+    async setTyping(target: SendTarget, isTyping: boolean): Promise<void> {
+      const addressed =
+        "conversationId" in target ? target.conversationId : target.to;
+      const known = isChatGuid(addressed)
+        ? addressed
+        : chatGuids.get(addressed);
+      if (!known) {
+        // No chat to type in yet. Creating one just to show dots would be
+        // the first Photon hears of this number, which is a send's job.
+        return;
+      }
+      await client.setTyping(known, isTyping);
+    },
+
     async send(
       target: SendTarget,
       body: string,

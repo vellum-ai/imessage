@@ -105,6 +105,8 @@ export interface MessageClient {
    * from the outside has cost more than the call does.
    */
   describeAddress(address: string): Promise<AddressReport>;
+  /** Start or stop the transient typing indicator in a chat. */
+  setTyping(chatGuid: string, isTyping: boolean): Promise<void>;
   /** Release the gRPC channel. Called on provider shutdown. */
   close(): Promise<void>;
 }
@@ -175,6 +177,8 @@ export const createMessageClient: MessageClientFactory = (opts) => {
         services: info.services,
       };
     },
+
+    setTyping: (chatGuid, isTyping) => im.chats.setTyping(chatGuid, isTyping),
 
     close: () => im.close(),
   };

@@ -32,6 +32,8 @@ type MessageClientFactory = PhotonMessageClient["createMessageClient"];
 type PhotonMessage = Awaited<
   ReturnType<ReturnType<MessageClientFactory>["sendText"]>
 >;
+type PhotonLiveEvent = import("../providers/photon/message-client.ts").PhotonLiveEvent;
+type EventStream = import("../providers/photon/message-client.ts").EventStream<PhotonLiveEvent>;
 type PhotonChatResult = Awaited<
   ReturnType<ReturnType<MessageClientFactory>["createChat"]>
 >;
@@ -207,6 +209,11 @@ describe("comms provider", () => {
   test("supports polling", () => {
     expect(createCommsProvider().supportsPolling).toBe(true);
   });
+
+  test("does not support live ingress", () => {
+    expect(createCommsProvider().supportsLive).toBe(false);
+    expect(createCommsProvider().subscribeInbound).toBeUndefined();
+  });
 });
 
 
@@ -268,7 +275,12 @@ function photonMessage(
 
 /** What the fake message plane was asked to do. */
 interface PlaneCall {
-  kind: "sendText" | "createChat" | "listRecent" | "describeAddress";
+  kind:
+    | "sendText"
+    | "createChat"
+    | "listRecent"
+    | "describeAddress"
+    | "subscribeEvents";
   input: Record<string, unknown>;
 }
 
@@ -282,6 +294,7 @@ interface PlaneCall {
 function fakePlane(
   handler: (call: PlaneCall) => unknown = () => undefined,
   addressReport?: { address: string; country: string | null; services: string[] },
+  liveEvents: PhotonLiveEvent[] = [],
 ): { factory: MessageClientFactory; calls: PlaneCall[]; closed: () => number } {
   const planeCalls: PlaneCall[] = [];
   let closes = 0;
@@ -306,6 +319,17 @@ function fakePlane(
     async listRecent(input) {
       await opts.token();
       return (record("listRecent", input) as MessageListPage) ?? { messages: [] };
+    },
+    subscribeEvents(): EventStream {
+      record("subscribeEvents", {});
+      const events = liveEvents;
+      return {
+        async *[Symbol.asyncIterator]() {
+          await opts.token();
+          yield* events;
+        },
+        close() {},
+      };
     },
     async describeAddress(address) {
       await opts.token();
@@ -808,6 +832,10 @@ describe("photon provider", () => {
       },
       createChat: () => Promise.resolve({ chat: {} } as never),
       listRecent: () => Promise.resolve({ messages: [] }),
+      subscribeEvents: () => ({
+        async *[Symbol.asyncIterator]() {},
+        close() {},
+      }),
       describeAddress: (address: string) =>
         Promise.resolve({ address, country: null, services: [] }),
       close: () => Promise.resolve(),
@@ -905,6 +933,45 @@ describe("photon provider", () => {
 
   test("supports polling", () => {
     expect(createPhotonProvider().supportsPolling).toBe(true);
+  });
+
+  test("supports live ingress over the message-plane stream", () => {
+    expect(createPhotonProvider().supportsLive).toBe(true);
+  });
+
+  test("live subscribe normalizes message.received and skips the rest", async () => {
+    stubPhoton(() => undefined);
+    const plane = fakePlane(() => undefined, undefined, [
+      {
+        type: "message.read",
+        sequence: 1,
+      },
+      {
+        type: "message.received",
+        sequence: 2,
+        message: photonMessage({ guid: "p2p-in" }),
+      },
+      {
+        type: "message.received",
+        sequence: 3,
+        message: photonMessage({ guid: "p2p-me", isFromMe: true }),
+      },
+    ]);
+
+    const records = [];
+    const sub = createPhotonProvider(plane.factory).subscribeInbound?.();
+    if (!sub) {
+      throw new Error("expected subscribeInbound");
+    }
+    for await (const record of sub) {
+      records.push(record);
+    }
+
+    expect(records).toHaveLength(2);
+    expect(records[0]?.id).toBe("p2p-in");
+    expect(records[0]?.event?.actor.actorExternalId).toBe("+15551234567");
+    expect(records[1]?.id).toBe("p2p-me");
+    expect(records[1]?.event).toBeUndefined();
   });
 });
 

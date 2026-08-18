@@ -17,6 +17,7 @@ function providerWithAllow(
     id: "photon",
     label: "Photon (your own project)",
     supportsPolling: true,
+    supportsLive: true,
     checkReadiness: async () => ({ ready: true as const }),
     fetchInbound: async () => [],
     ensureWebhook: async () => ({ created: false }),

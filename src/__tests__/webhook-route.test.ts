@@ -171,6 +171,16 @@ describe("handleProviderWebhook", () => {
     expect(response.status).toBe(404);
   });
 
+  test("live mode leaves no live webhook surface", async () => {
+    setConfig(IMessageConfigSchema.parse({ ingressMode: "live" }));
+    const response = await handleProviderWebhook(
+      "photon",
+      post(commsDelivery()),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   test("an unloaded plugin reports 503 rather than dropping the delivery", async () => {
     // 503 invites the provider's retry; a 200 would tell it the message landed.
     const response = await handleProviderWebhook(

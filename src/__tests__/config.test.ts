@@ -31,6 +31,14 @@ describe("resolveConfig", () => {
     expect(config.pollIntervalMs).toBe(10_000);
   });
 
+  test("accepts live mode for Photon's gRPC stream", () => {
+    const { config } = resolveConfig({
+      provider: "photon",
+      ingressMode: "live",
+    });
+    expect(config.ingressMode).toBe("live");
+  });
+
   test("falls back to defaults on an invalid value rather than throwing", () => {
     // A bad interval should not stop the channel from loading.
     const { config, warnings } = resolveConfig({ pollIntervalMs: 5 });

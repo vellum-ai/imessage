@@ -39,8 +39,10 @@ cannot be added.
 **Sends work, nothing arrives** — in webhook mode, check the gateway's version
 before anything else: it has to read the verification descriptors in
 `channels/ingress.json`, and a gateway that predates them refuses every
-delivery with a 403 before the plugin sees it. Switching to poll sidesteps the
-question entirely. In poll mode, check that the key carries `comms_read`.
+delivery with a 403 before the plugin sees it. Switching to live (Photon) or
+poll sidesteps the question entirely. In poll mode, check that the key carries
+`comms_read`. In live mode, check the plugin log for `live stream failed` or
+`waiting until the provider is ready`.
 
 **`{"error":"Not Found"}` on every delivery** — that body is the gateway's, and
 it means the gateway found no servable route at that path. It says nothing more
@@ -89,7 +91,8 @@ common, so read the step before changing anything:
 - *reading the stored webhook secret* — never fatal on its own; registration
   continues. If it appears, the credential store answered oddly.
 - *working out this assistant's public URL* — there is no address to register.
-  The assistant needs a tunnel or a public ingress URL, or `ingressMode: "poll"`.
+  The assistant needs a tunnel or a public ingress URL, or `ingressMode: "live"`
+  (Photon) or `"poll"`.
 - *asking the provider to register the webhook* — the provider refused. The
   reason carries its status and its own words: a 401 is the wrong key, a 403 is
   a missing scope (`comms_webhooks`), a `could not be reached` is the network.

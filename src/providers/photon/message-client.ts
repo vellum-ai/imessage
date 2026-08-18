@@ -18,15 +18,18 @@
  *    either dial the network or need a process-global module mock. Injecting
  *    the factory costs one parameter and avoids both.
  *
- * Only the three calls this channel makes are re-exported. The SDK's surface
- * is far larger — reactions, polls, stickers, live event streams — and it can
- * be widened here when something needs it.
+ * The live event stream is the third ingress mode: inbound rides the same
+ * gRPC channel send already uses, so Photon can push messages without a
+ * public webhook URL. Hermes does the same thing, via a Node sidecar, because
+ * its gateway is Python. This plugin is already on the SDK, so the subscribe
+ * lives here rather than in a second process.
  */
 
 import { createGrpcClient } from "@photon-ai/advanced-imessage/grpc";
 import type {
   CreateChatResult,
   Message,
+  MessageEvent,
   MessageListPage as SdkMessageListPage,
 } from "@photon-ai/advanced-imessage/grpc";
 
@@ -65,11 +68,32 @@ export interface AddressReport {
   services: readonly string[];
 }
 
+/**
+ * One frame from the message-plane live stream.
+ *
+ * Narrower than the SDK's `MessageEvent` union: this plugin only turns
+ * `message.received` into inbound, and the rest of the adapter should not
+ * have to name every other variant to skip it.
+ */
+export interface PhotonLiveEvent {
+  type: MessageEvent["type"] | string;
+  sequence: number;
+  message?: PhotonMessage;
+}
+
+/** An abortable async iterable, which is what the SDK's streams are. */
+export interface EventStream<T> {
+  [Symbol.asyncIterator](): AsyncIterator<T>;
+  close(): void | Promise<void>;
+}
+
 /** What this plugin asks of the message plane. */
 export interface MessageClient {
   sendText(input: SendTextInput): Promise<PhotonMessage>;
   createChat(input: CreateChatInput): Promise<PhotonChatResult>;
   listRecent(input: ListRecentInput): Promise<MessageListPage>;
+  /** Live `message.*` events on the gRPC channel. */
+  subscribeEvents(): EventStream<PhotonLiveEvent>;
   /**
    * What Photon makes of an address.
    *
@@ -137,6 +161,11 @@ export const createMessageClient: MessageClientFactory = (opts) => {
         ...(input.after ? { after: input.after } : {}),
         ...(input.isFromMe === undefined ? {} : { isFromMe: input.isFromMe }),
       }),
+
+    subscribeEvents() {
+      const stream = im.messages.subscribeEvents();
+      return stream as unknown as EventStream<PhotonLiveEvent>;
+    },
 
     async describeAddress(address) {
       const info = await im.addresses.get(address);

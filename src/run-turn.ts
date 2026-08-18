@@ -69,50 +69,19 @@ function scoped(value: string): string {
 }
 
 /**
- * MiniMax / Hermes-style tool calls written as prose.
- *
- * Native tool_use blocks never reach this filter. This is only for the
- * case where the model dumped `to=bash code:` into a text block because
- * tools were missing from the request.
- */
-const LEAKED_TOOL_CALL = /(?:^|\n)to=(?:functions\.)?[\w.]+(?:\s+code:)?/m;
-
-function stripLeakedToolCallDump(text: string): string {
-  if (!LEAKED_TOOL_CALL.test(text)) {
-    return text.trim();
-  }
-  // The whole bubble is a tool-call dump, not an answer. Sending it would
-  // put internal command syntax on the recipient's phone.
-  return "";
-}
-
-/**
  * The assistant's final user-facing reply as plain text.
  *
  * A turn's content can include thinking, tool_use, and earlier narration.
- * iMessage only gets the trailing text after the last action block. Leaked
- * tool-call dumps that landed as text are dropped rather than forwarded.
+ * iMessage gets the last text block.
  */
-export function replyTextFrom(blocks: { type: string; text?: string }[]): string {
-  let lastAction = -1;
-  for (let i = 0; i < blocks.length; i++) {
-    const type = blocks[i]?.type;
-    if (
-      type &&
-      type !== "text" &&
-      type !== "thinking" &&
-      type !== "redacted_thinking"
-    ) {
-      lastAction = i;
+function replyTextFrom(blocks: { type: string; text?: string }[]): string {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.type === "text") {
+      return block.text?.trim() ?? "";
     }
   }
-  const reply = blocks
-    .slice(lastAction + 1)
-    .filter((block) => block.type === "text")
-    .map((block) => block.text?.trim())
-    .filter((text): text is string => Boolean(text))
-    .join("\n\n");
-  return stripLeakedToolCallDump(reply);
+  return "";
 }
 
 function sendTarget(event: PluginInboundEvent): SendTarget {

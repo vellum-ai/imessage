@@ -107,13 +107,14 @@ describe("runTurnForDelivery", () => {
     ]);
   });
 
-  test("sends only the trailing text after tool calls", async () => {
+  test("sends only the final text block", async () => {
     // Intermediate narration and tool_use blocks are not an iMessage reply.
     turnResult = {
       conversationId: "conv-1",
       content: [
         { type: "text", text: "let me check the live plugin list." },
         { type: "tool_use" },
+        { type: "thinking", text: "counting" },
         { type: "text", text: "You have three plugins enabled." },
       ],
     };
@@ -123,29 +124,6 @@ describe("runTurnForDelivery", () => {
     expect(sends.map((send) => send.body)).toEqual([
       "You have three plugins enabled.",
     ]);
-  });
-
-  test("does not forward leaked tool-call dumps as SMS", async () => {
-    turnResult = {
-      conversationId: "conv-1",
-      content: [
-        {
-          type: "text",
-          text: [
-            "let me check the live plugin list.",
-            "to=bash code:",
-            "assistant plugins list && assistant plugins --help",
-            "to=functions.bash code:",
-            '{"command":"assistant plugins list","timeout_seconds":120}',
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const result = await runTurnForDelivery({ event: delivery(), provider });
-
-    expect(result.replied).toBe(false);
-    expect(sends).toEqual([]);
   });
 
   test("shows typing before the turn and clears it after", async () => {

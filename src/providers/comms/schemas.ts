@@ -105,12 +105,33 @@ export const WebhookEventSchema = z.looseObject({
 export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
 
 /**
- * The event this channel subscribes to, as `POST /webhooks` names it.
+ * The event this channel subscribes to for inbound messages, as
+ * `POST /webhooks` names it.
  *
  * Documented at `docs.osis.co/messages-api/create-webhook` alongside
  * `comms.message.sent`, which this channel deliberately does not subscribe to.
  */
 export const COMMS_INBOUND_EVENT = "comms.message.received";
+
+/**
+ * Comms' delivery test, as `POST /webhooks/{id}/test` and the dashboard
+ * Send test post it.
+ *
+ * A webhook that is not subscribed to this event never sees the ping: Comms
+ * leaves it pending with zero attempts rather than posting it.
+ */
+export const COMMS_PING_EVENT = "comms.ping";
+
+/**
+ * Events this channel registers for.
+ *
+ * Received is inbound. Ping is the vendor's signed delivery test. Sent is
+ * omitted on purpose: those are our own replies echoed back.
+ */
+export const COMMS_WEBHOOK_EVENTS = [
+  COMMS_INBOUND_EVENT,
+  COMMS_PING_EVENT,
+] as const;
 
 /**
  * Event names that carry an inbound message from a human.
@@ -129,7 +150,7 @@ const INBOUND_EVENT_NAMES = new Set([COMMS_INBOUND_EVENT, "message.received"]);
  * all work. Both spellings for the same reason the inbound names have both:
  * the registration name is documented, the envelope's is not.
  */
-const PING_EVENT_NAMES = new Set(["comms.ping", "ping"]);
+const PING_EVENT_NAMES = new Set([COMMS_PING_EVENT, "ping"]);
 
 /** Whether an event is the vendor confirming it can reach us. */
 export function isPingEvent(event: WebhookEvent): boolean {
@@ -219,6 +240,22 @@ export function webhooksFromListing(raw: unknown): CommsWebhook[] {
 /** The registered URL, whichever spelling the wire uses. */
 export function webhookUrlOf(hook: CommsWebhook): string | undefined {
   return pickFirstString(hook.url, hook.webhook_url, hook.webhookUrl);
+}
+
+/**
+ * Whether a listed webhook already covers the events this channel needs.
+ *
+ * A listing that omits `events` is treated as already covering them: rotating
+ * the secret on every start because the listing did not say would be worse
+ * than leaving a rare omitted-field registration alone. A listing that names
+ * events but is missing ping or received does not cover them.
+ */
+export function webhookHasRequiredEvents(hook: CommsWebhook): boolean {
+  const events = hook.events;
+  if (!events) {
+    return true;
+  }
+  return COMMS_WEBHOOK_EVENTS.every((event) => events.includes(event));
 }
 
 /** First non-empty value among several candidate spellings. */

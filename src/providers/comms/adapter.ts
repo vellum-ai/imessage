@@ -9,8 +9,9 @@
 import { CommsClient } from "./client.ts";
 import { classifyCommsWebhook, normalizeCommsMessage } from "./normalize.ts";
 import {
-  COMMS_INBOUND_EVENT,
+  COMMS_WEBHOOK_EVENTS,
   createdAtOf,
+  webhookHasRequiredEvents,
   webhookFromCreate,
   webhookUrlOf,
   webhooksFromListing,
@@ -67,16 +68,19 @@ export function createCommsProvider(): MessagingProvider {
     },
 
     /**
-     * `comms.message.received` only. Registering for `comms.message.sent`
-     * would deliver our own replies straight back, and the normalizer would
-     * drop every one of them — traffic and log noise for nothing.
+     * Subscribes to `comms.message.received` and `comms.ping`. Not
+     * `comms.message.sent`: those are our own replies echoed back, and the
+     * normalizer drops every one. Ping is what the dashboard Send test posts;
+     * without it the delivery sits pending with zero attempts.
      *
      * The signing secret comes back from both the create and the listing, so
-     * an existing registration hands its secret over rather than being torn
-     * down: `opts.hasSecret` is deliberately unused here. A lost secret is a
-     * `GET` away, and re-registering would change the webhook id for nothing.
+     * an existing registration that already covers both events hands its
+     * secret over rather than being torn down: `opts.hasSecret` is
+     * deliberately unused here. A listing that names events but is missing
+     * ping is deleted and recreated so Send test starts working without a
+     * dashboard round trip.
      *
-     * Matching ignores a trailing slash — see {@link sameWebhookUrl}. Without
+     * Matching ignores a trailing slash. See {@link sameWebhookUrl}. Without
      * that, a registration stored as `events-comms/` reads as a different
      * address, this creates a second one beside it, and both deliver under
      * different secrets.
@@ -89,12 +93,15 @@ export function createCommsProvider(): MessagingProvider {
         opts.url,
         webhookUrlOf,
       );
-      if (existing) {
+      if (existing && webhookHasRequiredEvents(existing)) {
         return { created: false, id: existing.id, secret: existing.secret };
+      }
+      if (existing?.id) {
+        await client.deleteWebhook(existing.id);
       }
 
       const created = webhookFromCreate(
-        await client.createWebhook(opts.url, [COMMS_INBOUND_EVENT]),
+        await client.createWebhook(opts.url, [...COMMS_WEBHOOK_EVENTS]),
       );
       return { created: true, id: created?.id, secret: created?.secret };
     },

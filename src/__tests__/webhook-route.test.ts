@@ -58,7 +58,12 @@ describe("handleProviderWebhook", () => {
     // error: the delivery is authentic and retrying changes nothing, and a 4xx
     // would have the provider retry or disable a webhook whose only problem is
     // that it is stale.
-    setConfig(IMessageConfigSchema.parse({ provider: "photon" }));
+    setConfig(
+      IMessageConfigSchema.parse({
+        provider: "photon",
+        ingressMode: "webhook",
+      }),
+    );
     const response = await handleProviderWebhook(
       "comms",
       post(commsDelivery()),
@@ -74,7 +79,12 @@ describe("handleProviderWebhook", () => {
     // A Comms envelope means nothing to the Photon normalizer. Binding the
     // normalizer to the path is what stops a delivery being read by an adapter
     // that cannot parse it.
-    setConfig(IMessageConfigSchema.parse({ provider: "photon" }));
+    setConfig(
+      IMessageConfigSchema.parse({
+        provider: "photon",
+        ingressMode: "webhook",
+      }),
+    );
     const response = await handleProviderWebhook(
       "photon",
       post(commsDelivery()),

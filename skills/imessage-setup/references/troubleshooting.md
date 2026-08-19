@@ -76,12 +76,15 @@ trailing-slash URL with Photon so the vendor never walks that redirect. If an
 older registration is still slashless, restart the channel (or re-save
 credentials) so `ensureWebhook` can replace it.
 
-**Checking inbound without waiting for a text** — on Comms, `POST
+**Checking inbound without waiting for a text.** On Comms, `POST
 /api/v1/comms/webhooks/{id}/test` sends a signed `comms.ping` through the real
-delivery pipeline (same envelope, same signature). A 403 at the gateway means
-verification is not implemented for the route's descriptor yet; a 200 with
-`ignored: "not an inbound message"` in the plugin's logs means the whole path
-works and a ping is simply not a turn.
+delivery pipeline (same envelope, same signature). The plugin registers for
+that event alongside `comms.message.received`; a webhook subscribed only to
+received leaves the ping pending with zero attempts. Restart the channel (or
+re-save credentials) so `ensureWebhook` can replace a received-only
+registration. A 403 at the gateway means verification is not implemented for
+the route's descriptor yet; a 200 with `probe: "comms.ping"` in the plugin's
+reply means the whole path works and a ping is simply not a turn.
 
 **The provider shows zero webhooks and nothing says why** — the plugin records
 its last registration attempt in the settings app, and the line names the step

@@ -143,6 +143,19 @@ export class CommsClient {
   }
 
   /**
+   * `DELETE /webhooks/{id}`.
+   *
+   * Used when an existing registration is missing ping (or received) so the
+   * next create can subscribe to the events this channel actually handles.
+   * The dashboard Delete control is the same resource.
+   */
+  async deleteWebhook(id: string): Promise<void> {
+    await this.request(`/webhooks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * One authenticated request, retrying 429s and 5xx with exponential backoff.
    *
    * The API key is resolved per request rather than cached, so a rotated key

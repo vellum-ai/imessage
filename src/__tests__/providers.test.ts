@@ -1040,11 +1040,13 @@ describe("photon provider", () => {
 });
 
 describe("webhook registration", () => {
-  test("comms registers for message.received only, and keeps the secret", async () => {
+  test("comms registers for message.received and ping, and keeps the secret", async () => {
     // Registering for message.sent would deliver our own replies back, and the
-    // normalizer would drop every one of them. The `whsec_` secret comes back
-    // from the 201 wrapped as `{ webhook }` — reading it out of the wrong
-    // nesting stores nothing and fails every later verification.
+    // normalizer would drop every one of them. Ping is the dashboard Send
+    // test; without it that delivery sits pending with zero attempts. The
+    // `whsec_` secret comes back from the 201 wrapped as `{ webhook }` —
+    // reading it out of the wrong nesting stores nothing and fails every
+    // later verification.
     stubFetch((call) =>
       call.init.method === "GET"
         ? Response.json({ webhooks: [] })
@@ -1070,7 +1072,7 @@ describe("webhook registration", () => {
     expect(calls.map((c) => c.init.method)).toEqual(["GET", "POST"]);
     expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
       url: "https://host.example/events-comms",
-      events: ["comms.message.received"],
+      events: ["comms.message.received", "comms.ping"],
     });
   });
 
@@ -1100,6 +1102,84 @@ describe("webhook registration", () => {
       created: false,
       id: "wh_2",
       secret: "whsec_recovered",
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("comms replaces a received-only registration so ping is subscribed", async () => {
+    // A webhook that only names `comms.message.received` never sees the
+    // dashboard Send test: Comms leaves `comms.ping` pending with zero
+    // attempts rather than posting an event the endpoint is not subscribed
+    // to. Recreating is what adds ping without a dashboard round trip.
+    stubFetch((call) => {
+      if (call.init.method === "GET") {
+        return Response.json({
+          webhooks: [
+            {
+              id: "wh_old",
+              url: "https://host.example/events-comms",
+              secret: "whsec_old",
+              events: ["comms.message.received"],
+            },
+          ],
+        });
+      }
+      if (call.init.method === "DELETE") {
+        expect(call.path).toBe("/webhooks/wh_old");
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({
+        webhook: {
+          id: "wh_new",
+          url: "https://host.example/events-comms",
+          secret: "whsec_new",
+          events: ["comms.message.received", "comms.ping"],
+        },
+      });
+    });
+
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/events-comms",
+      hasSecret: true,
+    });
+
+    expect(result).toEqual({
+      created: true,
+      id: "wh_new",
+      secret: "whsec_new",
+    });
+    expect(calls.map((c) => c.init.method)).toEqual(["GET", "DELETE", "POST"]);
+    expect(JSON.parse(String(calls[2]?.init.body))).toEqual({
+      url: "https://host.example/events-comms",
+      events: ["comms.message.received", "comms.ping"],
+    });
+  });
+
+  test("comms keeps a registration that already includes ping", async () => {
+    stubFetch((call) =>
+      call.init.method === "GET"
+        ? Response.json({
+            webhooks: [
+              {
+                id: "wh_ok",
+                url: "https://host.example/events-comms",
+                secret: "whsec_ok",
+                events: ["comms.message.received", "comms.ping"],
+              },
+            ],
+          })
+        : Response.json({}),
+    );
+
+    const result = await createCommsProvider().ensureWebhook({
+      url: "https://host.example/events-comms",
+      hasSecret: true,
+    });
+
+    expect(result).toEqual({
+      created: false,
+      id: "wh_ok",
+      secret: "whsec_ok",
     });
     expect(calls).toHaveLength(1);
   });

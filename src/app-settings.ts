@@ -40,7 +40,16 @@ export type ConfigUpdate = z.infer<typeof ConfigUpdateSchema>;
 
 /** Body accepted by the dedicated provider-change route. */
 export const ProviderChangeSchema = z
-  .object({ provider: z.enum(PROVIDER_IDS) })
+  .object({
+    provider: z.enum(PROVIDER_IDS),
+    /**
+     * Optional so a provider switch can land on the new provider's ingress
+     * in one write. Without it, the file would keep the previous mode and a
+     * follow-up PATCH would start the channel twice, the first time on a
+     * mode the user already left.
+     */
+    ingressMode: z.enum(INGRESS_MODES).optional(),
+  })
   .strict();
 
 export type ProviderChange = z.infer<typeof ProviderChangeSchema>;
@@ -102,8 +111,23 @@ export function applyConfigUpdate(
   configPath: string,
   update: ConfigUpdate,
 ): ConfigView {
-  const merged = { ...readConfigObject(configPath), ...update };
+  const view = mergeConfigUpdate(configPath, update);
+  writeConfigObject(configPath, { ...readConfigObject(configPath), ...update });
+  return view;
+}
 
+/**
+ * Validate a partial update against the current file without writing it.
+ *
+ * A settings save starts the channel on this view first, and only writes if
+ * that start succeeds. Parsing here is what rejects an out-of-range interval
+ * before ingress is torn down.
+ */
+export function mergeConfigUpdate(
+  configPath: string,
+  update: ConfigUpdate,
+): ConfigView {
+  const merged = { ...readConfigObject(configPath), ...update };
   const parsed = IMessageConfigSchema.safeParse(merged);
   if (!parsed.success) {
     throw new ConfigValidationError(
@@ -112,8 +136,6 @@ export function applyConfigUpdate(
         .join("; "),
     );
   }
-
-  writeConfigObject(configPath, merged);
   return parsed.data;
 }
 
@@ -121,13 +143,21 @@ export function applyConfigUpdate(
  * Persist a provider change and return the new view.
  *
  * Only writes the config. Restarting the ingress is the caller's job, because
- * the runtime is not reachable from a pure settings module.
+ * the runtime is not reachable from a pure settings module. The caller starts
+ * the channel before this write, so a credential that cannot resolve never
+ * lands a provider the user cannot actually use.
  */
 export function applyProviderChange(
   configPath: string,
   change: ProviderChange,
 ): ConfigView {
-  const merged = { ...readConfigObject(configPath), provider: change.provider };
+  const merged = {
+    ...readConfigObject(configPath),
+    provider: change.provider,
+    ...(change.ingressMode !== undefined
+      ? { ingressMode: change.ingressMode }
+      : {}),
+  };
   writeConfigObject(configPath, merged);
   return IMessageConfigSchema.parse(merged);
 }

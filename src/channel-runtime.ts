@@ -24,6 +24,7 @@ import {
   getProvider,
   getSupervisor,
   getLiveIngress,
+  getWebhookReport,
   setChannel,
   setConfig,
   setWebhookReport,
@@ -40,6 +41,7 @@ import {
   ingressRoutePath,
   resolveWebhookEndpoint,
 } from "./webhook-endpoint.ts";
+import { describeWebhookFailure } from "./webhook-report.ts";
 import { PollWorkerSupervisor } from "./worker/supervisor.ts";
 
 /**
@@ -60,6 +62,18 @@ export interface StartRuntimeResult {
   status: ChannelStatus;
   /** Why the channel is idle. Only set when `status` is `idle`. */
   idleReason?: string;
+}
+
+export interface StartRuntimeOptions {
+  /**
+   * Wait for webhook registration or live readiness before returning.
+   *
+   * Boot leaves this off: registration is a network round trip, and plugin
+   * load should not block on it. A settings save turns it on so a credential
+   * that cannot resolve fails the save instead of writing the new provider
+   * and reporting success while inbound is dead.
+   */
+  waitForSetup?: boolean;
 }
 
 /**
@@ -253,9 +267,10 @@ function derivedContext(): RuntimeContext {
  * provider does not support, leaves the channel idle with a reason. Plugin
  * load and a settings edit both need to survive a bad configuration.
  */
-export function startChannelRuntime(
+export async function startChannelRuntime(
   config: IMessageConfig,
-): StartRuntimeResult {
+  options: StartRuntimeOptions = {},
+): Promise<StartRuntimeResult> {
   const ctx = getInitContext() ?? derivedContext();
 
   stopIngress();
@@ -288,11 +303,21 @@ export function startChannelRuntime(
       { provider: provider.id },
       `imessage: webhook ingress — inbound arrives at /webhooks/plugins/${ctx.pluginName}/${ingressRoutePath(provider.id)}`,
     );
-    // Deliberately not awaited: registration is a network round trip to the
-    // provider, and neither plugin boot nor a settings save should block on
-    // it. A failure leaves the channel running — outbound still works, and
-    // inbound was not going to arrive either way.
-    void registerWebhook(provider, ctx.logger);
+    if (options.waitForSetup) {
+      await registerWebhook(provider, ctx.logger);
+      const report = getWebhookReport();
+      if (report?.outcome === "failed") {
+        return {
+          status: "idle",
+          idleReason: describeWebhookFailure(report),
+        };
+      }
+    } else {
+      // Boot does not wait: registration is a network round trip, and plugin
+      // load should not block on it. A failure leaves the channel running.
+      // Outbound still works, and inbound was not going to arrive either way.
+      void registerWebhook(provider, ctx.logger);
+    }
     return { status: "running" };
   }
 
@@ -301,6 +326,13 @@ export function startChannelRuntime(
       const idleReason = `provider ${provider.id} does not support live ingress`;
       ctx.logger.warn({ provider: provider.id }, `imessage: ${idleReason}`);
       return { status: "idle", idleReason };
+    }
+
+    if (options.waitForSetup) {
+      const readiness = await provider.checkReadiness();
+      if (!readiness.ready) {
+        return { status: "idle", idleReason: readiness.reason };
+      }
     }
 
     const live = new LiveIngress({

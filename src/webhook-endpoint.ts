@@ -65,7 +65,25 @@ export type WebhookUrlResolver = (opts: {
   sourceIdentifier?: string;
 }) => Promise<string>;
 
+/**
+ * Test seam: supply a URL resolver without a host that exports one.
+ *
+ * `resolveWebhookEndpoint` already takes an optional resolver, but webhook
+ * registration calls it with none, and a test cannot swap the plugin-api
+ * namespace after this module has imported it.
+ */
+let webhookUrlResolverOverride: WebhookUrlResolver | undefined;
+
+export function setWebhookUrlResolverOverride(
+  resolver: WebhookUrlResolver | undefined,
+): void {
+  webhookUrlResolverOverride = resolver;
+}
+
 function hostResolver(): WebhookUrlResolver | undefined {
+  if (webhookUrlResolverOverride) {
+    return webhookUrlResolverOverride;
+  }
   const candidate = (pluginApi as Record<string, unknown>)
     .resolveWebhookUrl;
   return typeof candidate === "function"

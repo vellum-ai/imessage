@@ -16,8 +16,10 @@ import {
   ConfigUpdateSchema,
   ConfigValidationError,
   CredentialUpdateSchema,
+  mergeConfigUpdate,
   ProviderChangeSchema,
   readConfigView,
+  type ProviderChange,
 } from "./app-settings.ts";
 import { startChannelRuntime } from "./channel-runtime.ts";
 import { INGRESS_MODES } from "./config.ts";
@@ -127,8 +129,15 @@ export async function handleCredentialsPost(
   const config = readConfigView(pluginConfigPath());
   const result =
     config.provider === parsed.data.provider
-      ? startChannelRuntime(config)
+      ? await startChannelRuntime(config, { waitForSetup: true })
       : undefined;
+
+  if (result?.status === "idle") {
+    return json(
+      { error: result.idleReason ?? "Could not start the channel." },
+      400,
+    );
+  }
 
   return json({
     credentials: await readCredentialStatus(),
@@ -163,9 +172,9 @@ export async function handleSettingsPatch(
     );
   }
 
-  let config;
+  let next;
   try {
-    config = applyConfigUpdate(pluginConfigPath(), parsed.data);
+    next = mergeConfigUpdate(pluginConfigPath(), parsed.data);
   } catch (err) {
     if (err instanceof ConfigValidationError) {
       return json({ error: err.message }, 400);
@@ -173,9 +182,20 @@ export async function handleSettingsPatch(
     throw err;
   }
 
-  // Ingress settings change how inbound is received, so the runtime is
-  // restarted rather than left on the previous configuration until a reboot.
-  const result = startChannelRuntime(config);
+  const previous = readConfigView(pluginConfigPath());
+  // Ingress settings change how inbound is received. Start the new mode
+  // before writing so a credential that cannot resolve fails the save
+  // instead of leaving the file on a mode the channel cannot use.
+  const result = await startChannelRuntime(next, { waitForSetup: true });
+  if (result.status === "idle") {
+    await startChannelRuntime(previous);
+    return json(
+      { error: result.idleReason ?? "Could not apply settings." },
+      400,
+    );
+  }
+
+  const config = applyConfigUpdate(pluginConfigPath(), parsed.data);
 
   return json({
     config,
@@ -187,9 +207,11 @@ export async function handleSettingsPatch(
 /**
  * `POST /x/plugins/imessage/provider`: switch providers.
  *
- * Deliberately separate from the settings PATCH: after the config write the
- * old ingress is torn down and the new provider's is started immediately.
- * Posting the active provider bounces it, which is a useful way to recover a
+ * Deliberately separate from the settings PATCH: the new provider is started
+ * first, and the config file is only written if that start succeeds. A
+ * credential that cannot resolve (the usual first-save failure) must not
+ * leave the file naming a provider the channel cannot use. Posting the
+ * active provider still bounces it, which is a useful way to recover a
  * wedged worker without restarting the daemon.
  */
 export async function handleProviderPost(request: Request): Promise<Response> {
@@ -208,14 +230,57 @@ export async function handleProviderPost(request: Request): Promise<Response> {
     );
   }
 
-  const config = applyProviderChange(pluginConfigPath(), parsed.data);
-  const result = startChannelRuntime(config);
+  const switched = await switchChannelProvider(
+    pluginConfigPath(),
+    parsed.data,
+  );
+  if (!switched.ok) {
+    return json({ error: switched.error }, 400);
+  }
 
   return json({
-    config,
+    config: switched.config,
     activeProvider: getProvider()?.id ?? null,
-    status: result.status,
-    idleReason: result.idleReason ?? null,
+    status: switched.result.status,
+    idleReason: switched.result.idleReason ?? null,
     credentials: await readCredentialStatus(),
   });
+}
+
+/**
+ * Start `change` in memory, persist it only if the channel comes up.
+ *
+ * On failure the previously persisted config is started again so the running
+ * provider and the file stay in agreement. Exported for tests that drive the
+ * write-or-don't-write decision against a temp file.
+ */
+export async function switchChannelProvider(
+  configPath: string,
+  change: ProviderChange,
+): Promise<
+  | {
+      ok: true;
+      config: ReturnType<typeof applyProviderChange>;
+      result: Awaited<ReturnType<typeof startChannelRuntime>>;
+    }
+  | { ok: false; error: string }
+> {
+  const previous = readConfigView(configPath);
+  const next = {
+    ...previous,
+    provider: change.provider,
+    ...(change.ingressMode !== undefined
+      ? { ingressMode: change.ingressMode }
+      : {}),
+  };
+  const result = await startChannelRuntime(next, { waitForSetup: true });
+  if (result.status === "idle") {
+    await startChannelRuntime(previous);
+    return {
+      ok: false,
+      error: result.idleReason ?? "Could not start the selected provider.",
+    };
+  }
+  const config = applyProviderChange(configPath, change);
+  return { ok: true, config, result };
 }

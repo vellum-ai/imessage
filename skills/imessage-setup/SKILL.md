@@ -39,7 +39,7 @@ Either works. Ask which account they already have before creating one.
 | --- | --- | --- |
 | Credentials | Project ID + project secret | One API key |
 | Sending | Mints a short-lived token, then sends over gRPC | One REST call |
-| Ingress | Webhook, live gRPC, or poll | Webhook or poll |
+| Ingress | Live gRPC (default), webhook, or poll | Webhook or poll |
 
 Everything below covers Photon. For Comms, the shape is the same and only the
 two steps marked **Comms** differ.
@@ -142,10 +142,10 @@ there is nothing to compose or configure here. On Photon, that same start also
 allows the assistant's contact phone numbers (step 3); a number added as a
 contact later still needs `allow.ts`.
 
-Photon also has a live gRPC mode (`ingressMode: "live"`) that reads inbound
+Photon defaults to live gRPC (`ingressMode: "live"`) that reads inbound
 off the same message-plane connection send already uses. It needs no public
-URL and no webhook secret. Pick it from the settings app when the assistant
-has no reachable ingress. Comms has no such stream.
+URL and no webhook secret. Webhook mode is still available when the provider
+can reach this assistant. Comms has no live stream and reads as webhook.
 
 ## Configuration
 
@@ -154,7 +154,7 @@ Optional, in the plugin's `config.json`:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `provider` | `"photon"` | `"photon"` or `"comms"`. Set it from the settings app, which restarts ingress; editing it here needs a reload. |
-| `ingressMode` | `"webhook"` | `"webhook"`, `"live"` (Photon gRPC stream), or `"poll"`. Set it from the settings app, which restarts ingress. |
+| `ingressMode` | `"live"` | `"live"` (Photon gRPC stream, the default), `"webhook"`, or `"poll"`. Set it from the settings app, which restarts ingress. Comms has no live stream, so `"live"` is read as `"webhook"`. |
 | `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only, and not surfaced in the settings app. |
 
 ## Troubleshooting

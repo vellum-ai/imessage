@@ -29,7 +29,7 @@ const init = async (ctx: InitContext): Promise<void> => {
     pluginName: pluginName(),
   });
 
-  const { status, idleReason } = startChannelRuntime(config);
+  const { status, idleReason } = await startChannelRuntime(config);
   if (status === "idle") {
     ctx.logger.info(
       { idleReason },

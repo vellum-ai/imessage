@@ -73,12 +73,12 @@ function withContext(): void {
 }
 
 describe("startChannelRuntime", () => {
-  test("a save before init still brings the channel up", () => {
+  test("a save before init still brings the channel up", async () => {
     // No `setInitContext` here: this is a settings save arriving on a route
     // while the hook has not run. It used to report a third status saying the
     // write applied on the next reload — true, and read as an alarm. The
     // runtime derives what it needs from its own location instead.
-    const result = startChannelRuntime(IMessageConfigSchema.parse({}));
+    const result = await startChannelRuntime(IMessageConfigSchema.parse({}));
 
     expect(result.status).toBe("running");
     expect(result.idleReason).toBeUndefined();
@@ -94,9 +94,9 @@ describe("startChannelRuntime", () => {
     expect(warnings.join(" ")).toContain("provider");
   });
 
-  test("webhook ingress comes up running", () => {
+  test("webhook ingress comes up running", async () => {
     withContext();
-    const result = startChannelRuntime(
+    const result = await startChannelRuntime(
       IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
 
@@ -106,9 +106,9 @@ describe("startChannelRuntime", () => {
     expect(getChannel()?.channel).toBe("imessage");
   });
 
-  test("live ingress comes up running on photon", () => {
+  test("live ingress comes up running on photon", async () => {
     withContext();
-    const result = startChannelRuntime(
+    const result = await startChannelRuntime(
       IMessageConfigSchema.parse({ ingressMode: "live" }),
     );
 
@@ -117,58 +117,63 @@ describe("startChannelRuntime", () => {
     expect(getProvider()?.id).toBe("photon");
   });
 
-  test("comms plus live leaves the channel idle", () => {
+  test("comms plus live leaves the channel idle", async () => {
     withContext();
-    const result = startChannelRuntime(
-      IMessageConfigSchema.parse({ provider: "comms", ingressMode: "live" }),
-    );
+    // Built by hand: the schema reads Comms+live as webhook, and the runtime
+    // still has to survive a caller that bypassed that.
+    const result = await startChannelRuntime({
+      ...IMessageConfigSchema.parse({ provider: "comms" }),
+      ingressMode: "live",
+    });
 
     expect(result.status).toBe("idle");
     expect(result.idleReason).toContain("does not support live ingress");
   });
 
-  test("is idempotent", () => {
+  test("is idempotent", async () => {
     withContext();
     const config = IMessageConfigSchema.parse({ ingressMode: "webhook" });
 
-    startChannelRuntime(config);
-    const second = startChannelRuntime(config);
+    await startChannelRuntime(config);
+    const second = await startChannelRuntime(config);
 
     expect(second.status).toBe("running");
     expect(getProvider()?.id).toBe("photon");
   });
 
-  test("a provider that cannot be built leaves the channel idle", () => {
+  test("a provider that cannot be built leaves the channel idle", async () => {
     // Plugin load has to survive a provider that throws rather than fail.
     withContext();
-    const result = startChannelRuntime(configNamingMissingProvider());
+    const result = await startChannelRuntime(configNamingMissingProvider());
 
     expect(result.status).toBe("idle");
     expect(result.idleReason).toContain("unknown provider");
     expect(getProvider()).toBeUndefined();
   });
 
-  test("a failed switch clears the previous provider", () => {
+  test("a failed switch clears the previous provider", async () => {
     // Leaving the old provider active would keep sending over a provider the
     // config no longer names, while the settings app reported the new one.
     withContext();
-    startChannelRuntime(IMessageConfigSchema.parse({ ingressMode: "webhook" }));
+    await startChannelRuntime(
+      IMessageConfigSchema.parse({ ingressMode: "webhook" }),
+    );
     expect(getProvider()?.id).toBe("photon");
 
-    const result = startChannelRuntime(configNamingMissingProvider());
+    const result = await startChannelRuntime(configNamingMissingProvider());
 
     expect(result.idleReason).toBeTruthy();
     expect(getProvider()).toBeUndefined();
     expect(getChannel()).toBeUndefined();
   });
 
-  test("a restart rebuilds the channel rather than reusing the old one", () => {
+  test("a restart rebuilds the channel rather than reusing the old one", async () => {
     withContext();
     const config = IMessageConfigSchema.parse({ ingressMode: "webhook" });
 
-    startChannelRuntime(config);
+    await startChannelRuntime(config);
     const first = getChannel();
-    startChannelRuntime(config);
+    await startChannelRuntime(config);
 
     expect(getChannel()).not.toBe(first);
     expect(getProvider()?.id).toBe("photon");
@@ -180,10 +185,10 @@ describe("stopIngress", () => {
     expect(() => stopIngress()).not.toThrow();
   });
 
-  test("leaves the provider in place so outbound still works", () => {
+  test("leaves the provider in place so outbound still works", async () => {
     // Inbound being down should not take sending with it.
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
     stopIngress();
@@ -198,8 +203,8 @@ describe("webhook registration reporting", () => {
    * it was reached in QA. These pin the record that replaces the log.
    */
   async function settle(): Promise<void> {
-    // Registration is deliberately not awaited by `startChannelRuntime`, so
-    // let its microtasks drain before reading what it recorded.
+    // Registration is deliberately not awaited by `startChannelRuntime` on
+    // boot, so let its microtasks drain before reading what it recorded.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
@@ -207,7 +212,7 @@ describe("webhook registration reporting", () => {
     // No credentials in this environment, so the attempt fails on the way to
     // the provider. What matters is that a reason exists at all.
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
     );
     await settle();
@@ -220,7 +225,7 @@ describe("webhook registration reporting", () => {
 
   test("attempts nothing in poll mode", async () => {
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "poll" }),
     );
     await settle();
@@ -230,7 +235,7 @@ describe("webhook registration reporting", () => {
 
   test("attempts nothing in live mode", async () => {
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "photon", ingressMode: "live" }),
     );
     await settle();
@@ -244,7 +249,7 @@ describe("webhook registration reporting", () => {
     // remedies. "failed" alone leaves a reader checking all four — which is
     // the position a real incident left us in.
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
     );
     await settle();
@@ -263,7 +268,7 @@ describe("webhook registration reporting", () => {
     // unreachable store does. Treating that as "could not ask" and stopping
     // would break first-time setup outright, so it must get past the secret.
     withContext();
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
     );
     await settle();
@@ -274,7 +279,7 @@ describe("webhook registration reporting", () => {
   test("still records when no init context was ever set", async () => {
     // The path that produced the silence: a derived context used to carry a
     // no-op logger, so a failure here went nowhere at all.
-    startChannelRuntime(
+    await startChannelRuntime(
       IMessageConfigSchema.parse({ provider: "comms", ingressMode: "webhook" }),
     );
     await settle();

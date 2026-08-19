@@ -10,6 +10,7 @@ import {
   ConfigUpdateSchema,
   ConfigValidationError,
   CredentialUpdateSchema,
+  mergeConfigUpdate,
   ProviderChangeSchema,
   readConfigView,
 } from "../app-settings.ts";
@@ -32,7 +33,7 @@ describe("readConfigView", () => {
   test("a missing config reads as all-defaults", () => {
     const view = readConfigView(configPath);
     expect(view.provider).toBe("photon");
-    expect(view.ingressMode).toBe("webhook");
+    expect(view.ingressMode).toBe("live");
   });
 
   test("an unparsable config degrades to defaults", () => {
@@ -84,6 +85,16 @@ describe("applyConfigUpdate", () => {
 
     // The rejected value must not have been persisted.
     expect(JSON.parse(readFileSync(configPath, "utf-8")).pollIntervalMs).toBe(
+      undefined,
+    );
+  });
+
+  test("mergeConfigUpdate validates without writing", () => {
+    writeFileSync(configPath, JSON.stringify({ provider: "comms" }), "utf-8");
+
+    const view = mergeConfigUpdate(configPath, { ingressMode: "poll" });
+    expect(view.ingressMode).toBe("poll");
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).ingressMode).toBe(
       undefined,
     );
   });
@@ -146,6 +157,25 @@ describe("applyProviderChange", () => {
     expect(view.ingressMode).toBe("poll");
   });
 
+  test("persists an ingress mode sent with the provider", () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({ provider: "comms", ingressMode: "webhook" }),
+      "utf-8",
+    );
+
+    const view = applyProviderChange(configPath, {
+      provider: "photon",
+      ingressMode: "live",
+    });
+
+    expect(view.provider).toBe("photon");
+    expect(view.ingressMode).toBe("live");
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).ingressMode).toBe(
+      "live",
+    );
+  });
+
   test("rejects an unknown provider", () => {
     expect(
       ProviderChangeSchema.safeParse({ provider: "bluebubbles" }).success,
@@ -156,6 +186,15 @@ describe("applyProviderChange", () => {
     expect(
       ProviderChangeSchema.safeParse({ provider: "comms", extra: 1 }).success,
     ).toBe(false);
+  });
+
+  test("accepts an ingress mode alongside the provider", () => {
+    expect(
+      ProviderChangeSchema.safeParse({
+        provider: "photon",
+        ingressMode: "live",
+      }).success,
+    ).toBe(true);
   });
 });
 

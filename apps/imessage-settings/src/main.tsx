@@ -83,27 +83,27 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
  * Display copy for each ingress mode. Which ones exist comes from the plugin,
  * the same way the provider list does; this only says how to describe them.
  *
- * Webhook is the default and the one to use when the provider can reach this
- * assistant: the provider pushes, so a text becomes a turn in about a second.
- * Live connection is Photon's other push path, over the gRPC channel send
- * already uses, and needs no public URL. Polling exists for a deployment the
- * provider cannot reach and that is not Photon.
+ * Live connection is Photon's default: a gRPC stream on the same channel send
+ * already uses, and it needs no public URL. Webhook is the HTTP push path,
+ * used when the provider can reach this assistant and on Comms (which has no
+ * live stream). Polling exists for a deployment the provider cannot reach and
+ * that is not on Photon's live path.
  *
  * `pollIntervalMs` is deliberately absent. It is bounded in the config schema,
  * its default is right for both providers' rate limits, and someone who
- * genuinely needs to tune it can edit `config.json` — which is a better trade
+ * genuinely needs to tune it can edit `config.json`, which is a better trade
  * than a number input that mostly invites people to set it to 500.
  */
 const INGRESS_MODE_CATALOG = [
   {
-    id: "webhook",
-    label: "Webhook (recommended)",
-    note: "The provider delivers each message as it arrives. Needs a public ingress URL the provider can reach.",
+    id: "live",
+    label: "Live Connection (gRPC)",
+    note: "Holds Photon's gRPC stream and receives each message as it arrives. No public URL needed. Photon only.",
   },
   {
-    id: "live",
-    label: "Live connection (Photon)",
-    note: "Holds Photon's gRPC stream and receives each message as it arrives. No public URL needed. Photon only.",
+    id: "webhook",
+    label: "Webhook",
+    note: "The provider delivers each message as it arrives. Needs a public ingress URL the provider can reach.",
   },
   {
     id: "poll",
@@ -198,7 +198,11 @@ const STYLES = `
     border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: 13px;
   }
   .banner.warn { background: color-mix(in srgb, Mark 40%, transparent); }
-  .banner.err { background: color-mix(in srgb, LinkText 12%, transparent); }
+  .banner.err {
+    background: color-mix(in srgb, Canvas 82%, red);
+    color: color-mix(in srgb, CanvasText 35%, red);
+    border: 1px solid color-mix(in srgb, CanvasText 25%, red);
+  }
   .banner.info { background: color-mix(in srgb, CanvasText 8%, transparent); }
 `;
 
@@ -252,7 +256,7 @@ interface ChannelResult {
 }
 
 interface Notice {
-  tone: "info" | "warn";
+  tone: "info" | "warn" | "err";
   text: string;
 }
 
@@ -279,7 +283,7 @@ function noticeFor(result: ChannelResult, what: string): Notice {
       return { tone: "info", text: `${what} The channel is running.` };
     case "idle":
       return {
-        tone: "warn",
+        tone: "err",
         text: `${what} The channel is not running: ${
           result.idleReason ?? "no reason given"
         }`,
@@ -441,39 +445,12 @@ function App(): React.ReactElement {
       let result: ChannelResult = {};
       let what = "Saved.";
 
-      // Provider, then ingress mode, then credentials. Each of the three
-      // restarts the channel, so the order decides which restart is the one
-      // still standing when the notice is written — and that should be the
-      // last pass, on the final configuration, with the key in place. Doing
-      // credentials first would report on a channel two edits out of date.
-      if (draftProvider !== settings.config.provider) {
-        result = await apiRequest<ChannelResult>(
-          `Switching to ${labelFor(draftProvider)}`,
-          `${BASE}/provider`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ provider: draftProvider }),
-          },
-        );
-        what = `Switched to ${labelFor(draftProvider)}.`;
-      }
-
-      if (draftIngress !== settings.config.ingressMode) {
-        result = await apiRequest<ChannelResult>(
-          "Saving ingress mode",
-          `${BASE}/settings`,
-          {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ingressMode: draftIngress }),
-          },
-        );
-        // `what` is left alone: it already reads "Saved.", and when the
-        // provider also changed, "Switched to Photon." is the more useful
-        // sentence to keep.
-      }
-
+      // Credentials, then provider (with the draft ingress), then an
+      // ingress-only PATCH if the provider did not change. Credentials go
+      // first so a switch onto Photon can resolve the project id the user
+      // just pasted. The provider route starts the channel before it writes,
+      // so a credential that cannot resolve fails the save instead of
+      // committing a provider the channel cannot use.
       if (Object.keys(values).length > 0) {
         result = await apiRequest<ChannelResult>(
           "Saving credentials",
@@ -482,6 +459,32 @@ function App(): React.ReactElement {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ provider: draftProvider, values }),
+          },
+        );
+      }
+
+      if (draftProvider !== settings.config.provider) {
+        result = await apiRequest<ChannelResult>(
+          `Switching to ${labelFor(draftProvider)}`,
+          `${BASE}/provider`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              provider: draftProvider,
+              ingressMode: draftIngress,
+            }),
+          },
+        );
+        what = `Switched to ${labelFor(draftProvider)}.`;
+      } else if (draftIngress !== settings.config.ingressMode) {
+        result = await apiRequest<ChannelResult>(
+          "Saving ingress mode",
+          `${BASE}/settings`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ingressMode: draftIngress }),
           },
         );
       }
@@ -554,7 +557,11 @@ function App(): React.ReactElement {
                 const next = event.target.value;
                 setDraftProvider(next);
                 setDrafts({});
-                if (next !== "photon" && draftIngress === "live") {
+                if (next === "photon") {
+                  if (draftIngress !== "poll") {
+                    setDraftIngress("live");
+                  }
+                } else if (draftIngress === "live") {
                   setDraftIngress("webhook");
                 }
               }}
@@ -630,7 +637,13 @@ function App(): React.ReactElement {
               ))}
             </select>
             {ingress ? <p className="note">{ingress.note}</p> : null}
-            {webhookNote ? <p className="note">{webhookNote}</p> : null}
+            {webhookNote ? (
+              settings.webhook?.outcome === "failed" ? (
+                <div className="banner err">{webhookNote}</div>
+              ) : (
+                <p className="note">{webhookNote}</p>
+              )
+            ) : null}
           </div>
 
           <div className="actions">

@@ -105,15 +105,14 @@ export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
 /**
  * How inbound messages reach the plugin.
  *
- * `webhook` is the default: the provider pushes, so a message becomes a turn
- * within a second rather than within a poll interval, and nothing burns
- * requests while a line is quiet. Signature verification belongs to the
- * gateway, so the route only ever sees deliveries the gateway already
- * authenticated.
+ * `live` is the default on Photon: it holds the provider's long-lived gRPC
+ * connection (the same channel send already uses) and reads inbound off it.
+ * That needs no public URL and no webhook secret. Comms has no such plane, so
+ * a Comms config that names `live` is read as `webhook`.
  *
- * `live` holds the provider's long-lived connection and reads inbound off it.
- * Photon already has that connection (gRPC, the same channel send uses), so
- * this needs no public URL and no webhook secret. Comms has no such plane.
+ * `webhook` is the provider pushing over HTTP. Signature verification belongs
+ * to the gateway, so the route only ever sees deliveries the gateway already
+ * authenticated.
  *
  * `poll` exists for deployments whose gateway is not reachable from the
  * internet and whose provider has no live stream. It only works on providers
@@ -126,27 +125,34 @@ export type IngressMode = (typeof INGRESS_MODES)[number];
 const MIN_POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_INTERVAL_MS = 300_000;
 
-export const IMessageConfigSchema = z.object({
-  provider: z
-    .enum(PROVIDER_IDS)
-    .default("photon")
-    .describe(
-      "Which provider backs the line: 'photon' (your own Photon project, the default) or 'comms' (your own Comms by Osis account).",
-    ),
-  ingressMode: z
-    .enum(INGRESS_MODES)
-    .default("webhook")
-    .describe(
-      "How inbound messages arrive: 'webhook' (default), 'live' (Photon's gRPC stream, no public URL), or 'poll' for deployments with no public ingress.",
-    ),
-  pollIntervalMs: z
-    .number()
-    .int()
-    .min(MIN_POLL_INTERVAL_MS)
-    .max(MAX_POLL_INTERVAL_MS)
-    .default(5_000)
-    .describe("Delay between polls, in milliseconds. Only used in poll mode."),
-});
+export const IMessageConfigSchema = z
+  .object({
+    provider: z
+      .enum(PROVIDER_IDS)
+      .default("photon")
+      .describe(
+        "Which provider backs the line: 'photon' (your own Photon project, the default) or 'comms' (your own Comms by Osis account).",
+      ),
+    ingressMode: z
+      .enum(INGRESS_MODES)
+      .default("live")
+      .describe(
+        "How inbound messages arrive: 'live' (Photon's gRPC stream, the default), 'webhook', or 'poll' for deployments with no public ingress.",
+      ),
+    pollIntervalMs: z
+      .number()
+      .int()
+      .min(MIN_POLL_INTERVAL_MS)
+      .max(MAX_POLL_INTERVAL_MS)
+      .default(5_000)
+      .describe("Delay between polls, in milliseconds. Only used in poll mode."),
+  })
+  .transform((config) => {
+    if (config.provider === "comms" && config.ingressMode === "live") {
+      return { ...config, ingressMode: "webhook" as const };
+    }
+    return config;
+  });
 
 export type IMessageConfig = z.infer<typeof IMessageConfigSchema>;
 

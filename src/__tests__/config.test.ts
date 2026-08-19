@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { IMessageConfigSchema, resolveConfig } from "../config.ts";
 
 describe("resolveConfig", () => {
-  test("defaults to photon over webhooks", () => {
+  test("defaults to photon over live gRPC", () => {
     // Bring-your-own is the only path either way: dedicated lines are priced
     // per line by every vendor that offers them, so there is nothing to bundle.
     const { config } = resolveConfig({});
     expect(config.provider).toBe("photon");
-    expect(config.ingressMode).toBe("webhook");
+    expect(config.ingressMode).toBe("live");
   });
 
   test("accepts an absent config", () => {
@@ -18,7 +18,18 @@ describe("resolveConfig", () => {
   test("accepts an explicit provider", () => {
     const { config, warnings } = resolveConfig({ provider: "comms" });
     expect(config.provider).toBe("comms");
+    // Comms has no live stream, so the live default is read as webhook.
+    expect(config.ingressMode).toBe("webhook");
     expect(warnings).toEqual([]);
+  });
+
+  test("reads comms plus live as webhook", () => {
+    const { config } = resolveConfig({
+      provider: "comms",
+      ingressMode: "live",
+    });
+    expect(config.provider).toBe("comms");
+    expect(config.ingressMode).toBe("webhook");
   });
 
   test("accepts poll mode for deployments with no public ingress", () => {
@@ -50,7 +61,7 @@ describe("resolveConfig", () => {
     const { config, warnings } = resolveConfig({
       ingressMode: "carrier-pigeon",
     });
-    expect(config.ingressMode).toBe("webhook");
+    expect(config.ingressMode).toBe("live");
     expect(warnings.length).toBeGreaterThan(0);
   });
 
@@ -58,6 +69,14 @@ describe("resolveConfig", () => {
     const { config, warnings } = resolveConfig({ provider: "bluebubbles" });
     expect(config.provider).toBe("photon");
     expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  test("keeps an explicit photon webhook rather than migrating it to live", () => {
+    const { config } = resolveConfig({
+      provider: "photon",
+      ingressMode: "webhook",
+    });
+    expect(config.ingressMode).toBe("webhook");
   });
 
   test("bounds the poll interval", () => {

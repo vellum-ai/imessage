@@ -53,7 +53,7 @@
     {
       "path": "events-comms",
       "kind": "http",
-      "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received, comms.ping).",
+      "description": "Inbound message webhooks from a Comms by Osis line (comms.message.received).",
       "verification": {
         "kind": "hmac",
         "algorithm": "sha256",

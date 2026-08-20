@@ -396,14 +396,15 @@ describe("photon provider", () => {
     }
   });
 
-  test("a missing credential is a reason naming the settings app", async () => {
+  test("a missing credential quotes what the store said", async () => {
     credentialMode = "throw";
     const readiness = await createPhotonProvider().checkReadiness();
 
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
       expect(readiness.reason).toContain("Photon project ID");
-      expect(readiness.reason).toContain("settings app");
+      expect(readiness.reason).toContain("could not be read");
+      expect(readiness.reason).toContain("credential not found");
     }
   });
 
@@ -431,8 +432,19 @@ describe("photon provider", () => {
 
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
-      expect(readiness.reason).toContain("could not be resolved");
-      expect(readiness.reason).toContain("unreachable credential store");
+      expect(readiness.reason).toContain("could not be read");
+      expect(readiness.reason).not.toContain("is not set");
+    }
+  });
+
+  test("an empty credential names the settings app", async () => {
+    credentialValue = "";
+    const readiness = await createPhotonProvider().checkReadiness();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.reason).toContain("is not set");
+      expect(readiness.reason).toContain("settings app");
     }
   });
 

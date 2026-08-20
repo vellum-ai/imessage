@@ -69,12 +69,11 @@ describe("describeWebhookFailure", () => {
         provider: "photon",
         outcome: "failed",
         step: "call-provider",
-        reason:
-          "The Photon project ID could not be resolved — most likely it is not set, though an unreachable credential store looks the same from here. Add it in the iMessage settings app, or run: assistant credentials set --service imessage --field photon_project_id <value>. The credential store reported: Creden…",
+        reason: "The Photon project ID could not be read: credential not found",
         at: "2026-08-18T12:00:00.000Z",
       }),
     ).toBe(
-      "Registration failed while asking the provider to register the webhook: The Photon project ID could not be resolved — most likely it is not set, though an unreachable credential store looks the same from here. Add it in the iMessage settings app, or run: assistant credentials set --service imessage --field photon_project_id <value>. The credential store reported: Creden…",
+      "Webhook registration failed (call-provider): The Photon project ID could not be read: credential not found",
     );
   });
 });
@@ -87,7 +86,7 @@ describe("startChannelRuntime waitForSetup", () => {
     );
 
     expect(result.status).toBe("idle");
-    expect(result.idleReason).toContain("Photon project ID could not be resolved");
+    expect(result.idleReason).toContain("Photon project ID could not be read");
   });
 
   test("webhook ingress idles with the registration-failed wording", async () => {
@@ -100,10 +99,8 @@ describe("startChannelRuntime waitForSetup", () => {
     );
 
     expect(result.status).toBe("idle");
-    expect(result.idleReason).toContain(
-      "Registration failed while asking the provider to register the webhook",
-    );
-    expect(result.idleReason).toContain("Photon project ID could not be resolved");
+    expect(result.idleReason).toContain("Webhook registration failed");
+    expect(result.idleReason).toContain("Photon project ID could not be read");
   });
 });
 
@@ -123,7 +120,7 @@ describe("switchChannelProvider", () => {
 
     expect(switched.ok).toBe(false);
     if (!switched.ok) {
-      expect(switched.error).toContain("Photon project ID could not be resolved");
+      expect(switched.error).toContain("Photon project ID could not be read");
     }
     expect(JSON.parse(readFileSync(configPath, "utf-8")).provider).toBe(
       "comms",
@@ -145,9 +142,7 @@ describe("switchChannelProvider", () => {
 
     expect(switched.ok).toBe(false);
     if (!switched.ok) {
-      expect(switched.error).toContain(
-        "Registration failed while asking the provider to register the webhook",
-      );
+      expect(switched.error).toContain("Webhook registration failed");
     }
     expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
       provider: "comms",

@@ -116,15 +116,19 @@ export function describeFailure(
   res: Pick<VellumAppFetchResponse, "status" | "statusText">,
   bodyText: string,
 ): string {
-  const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
   const detail = errorDetail(bodyText);
-  return detail ? `${status}: ${detail}` : status;
+  if (detail) {
+    return detail;
+  }
+  return `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
 }
 
 /**
  * One request to a plugin route, where every failure names both what was being
- * attempted and what came back. `what` is a gerund phrase — "Loading settings"
- * — so the message reads as "Loading settings failed: HTTP 500: ...".
+ * attempted and what came back. `what` is a gerund phrase ("Loading settings")
+ * so the message reads as "Loading settings failed: ...". The route's own
+ * error body leads when it is there; the HTTP status is only used when the
+ * body has nothing to say.
  */
 export async function apiRequest<T>(
   what: string,

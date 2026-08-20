@@ -105,13 +105,13 @@ describe("errorDetail", () => {
 });
 
 describe("describeFailure", () => {
-  test("carries the status and the body's account of it", () => {
+  test("prefers the body's account of the failure over the status line", () => {
     expect(
       describeFailure(
         { status: 400, statusText: "Bad Request" },
         JSON.stringify({ error: "provider must be one of: vellum, comms" }),
       ),
-    ).toBe("HTTP 400 Bad Request: provider must be one of: vellum, comms");
+    ).toBe("provider must be one of: vellum, comms");
   });
 
   test("still says the status when the body is empty", () => {
@@ -171,7 +171,7 @@ describe("apiRequest", () => {
     ).rejects.toThrow("Loading settings failed: Failed to fetch");
   });
 
-  test("reports a route error with its status and body", async () => {
+  test("reports a route error with its body", async () => {
     setBridge(async () =>
       response({
         status: 400,
@@ -181,9 +181,7 @@ describe("apiRequest", () => {
     );
     await expect(
       apiRequest("Switching to Comms by Osis", "/x/plugins/imessage/provider"),
-    ).rejects.toThrow(
-      "Switching to Comms by Osis failed: HTTP 400 Bad Request: invalid JSON body",
-    );
+    ).rejects.toThrow("Switching to Comms by Osis failed: invalid JSON body");
   });
 
   test("reports a failure whose body never arrives", async () => {

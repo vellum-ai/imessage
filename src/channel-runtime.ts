@@ -199,11 +199,12 @@ async function registerWebhook(
  * Stop whatever ingress is running. Leaves the resolved provider in place so
  * outbound delivery still works while inbound is down.
  */
-export function stopIngress(): void {
+export async function stopIngress(): Promise<void> {
   getSupervisor()?.stop();
   setSupervisor(undefined);
-  getLiveIngress()?.stop();
+  const live = getLiveIngress();
   setLiveIngress(undefined);
+  await live?.stop();
 }
 
 /**
@@ -273,7 +274,7 @@ export async function startChannelRuntime(
 ): Promise<StartRuntimeResult> {
   const ctx = getInitContext() ?? derivedContext();
 
-  stopIngress();
+  await stopIngress();
   setConfig(config);
 
   // Clear the previous provider before attempting to build the new one. If the

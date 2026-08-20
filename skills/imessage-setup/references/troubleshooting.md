@@ -3,9 +3,19 @@
 Symptoms and what actually causes them. Read the entry that matches rather than
 working down the list — these are unrelated failures, not steps.
 
-**"The Photon project ID is not set"** (or the Comms equivalent) — step 2 was
-skipped or used a different service name. Check with `assistant credentials
-list`, or open the settings app, which shows which fields are stored.
+**"The Photon project ID is not set"** (or the Comms equivalent) — device
+login (`connect.ts --finish`) did not complete, or the Comms key was never
+stored. Check with `assistant credentials list`, or open the settings app,
+which shows which fields are stored.
+
+**Photon device login: "invalid_client"** — hosted Photon only accepts
+registered device clients. The script uses Photon's published CLI client id
+(`photon-cli`). Retry `--start`. If it still fails, use the manual
+project-id / project-secret fallback in the settings app.
+
+**Photon device login timed out or access_denied** — they did not approve in
+time, or they clicked Deny. Run `--start` again and have them approve while
+`--finish` is waiting.
 
 **Photon: "invalid credentials"** — the project ID and secret are a pair; a
 stale secret against a current id fails the same way a wrong id does. Re-copy

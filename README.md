@@ -22,8 +22,10 @@ You supply the line, from either of two providers:
 | **Photon** (default) | A project ID and project secret | [photon.codes](https://photon.codes) |
 | **Comms by Osis** | A Messages API key | [comms.osis.co](https://comms.osis.co) |
 
-Pick the provider and fill in its credentials in the plugin's settings app, or
-store them from a terminal:
+For Photon, the `imessage-setup` skill can connect the project through
+Photon's device login (approve a short code in the browser) and store the
+project id and secret itself. The settings app and a terminal still work as
+a manual fallback:
 
 ```bash
 assistant credentials set --service imessage --field photon_project_id <id>

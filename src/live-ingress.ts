@@ -93,8 +93,13 @@ export class LiveIngress {
     void this.loop();
   }
 
-  /** Stop the loop and abort the current stream. Safe when not running. */
-  stop(): void {
+  /**
+   * Stop the loop and close the current stream.
+   *
+   * Awaited on plugin shutdown so Photon's gRPC subscribe is released before
+   * the provider's channel is closed. Safe when not running.
+   */
+  async stop(): Promise<void> {
     this.running = false;
     if (this.sleepTimer) {
       clearTimeout(this.sleepTimer);
@@ -102,8 +107,12 @@ export class LiveIngress {
     }
     this.wakeup?.();
     this.wakeup = undefined;
-    void this.current?.close();
+    const current = this.current;
     this.current = undefined;
+    await current?.close();
+    // The loop exits on the next `running` check once the iterator
+    // completes. Do not wait on `loopDone` here: a subscribe that ignores
+    // `close()` would otherwise hang plugin disable.
   }
 
   private async loop(): Promise<void> {

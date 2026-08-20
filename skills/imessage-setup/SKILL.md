@@ -46,10 +46,36 @@ two steps marked **Comms** differ.
 
 ## 1. Create the line and get credentials
 
-Direct the user to https://photon.codes to create a project, then take its
-**project ID** and **project secret** from the dashboard. There is no scope list
-to get wrong: the pair authenticates everything, and the line comes from the
-project rather than being provisioned separately.
+**Photon (preferred):** do not send the user to copy a project secret. Run the
+device login so Photon creates or reuses a project named "Vellum Assistant"
+and this plugin stores the id and secret itself.
+
+```bash
+bun skills/imessage-setup/scripts/connect.ts --start
+```
+
+Show the user the printed URL and the short code. They sign in at
+https://app.photon.codes if needed, confirm the code matches, and click
+Approve. Then:
+
+```bash
+bun skills/imessage-setup/scripts/connect.ts --finish
+```
+
+`--finish` waits until they approve, then writes `photon_project_id` and
+`photon_project_secret` to the credential store. It never prints the secret.
+If they already have a "Vellum Assistant" project, it reuses it and rotates
+that project's secret. Pass `--force` on both commands only when they asked
+to reconnect.
+
+If device login is unavailable, the manual fallback is still valid: they
+create a project at https://photon.codes and paste the project ID and
+project secret into the settings app, or:
+
+```bash
+assistant credentials set --service imessage --field photon_project_id <id>
+assistant credentials set --service imessage --field photon_project_secret <secret>
+```
 
 **Comms** — instead of the above: create a workspace at https://comms.osis.co,
 provision a line, and mint a Messages API key. Scopes the key needs:
@@ -66,17 +92,16 @@ is the common failure of doing this piecemeal.
 
 ## 2. Store the credentials
 
-The settings app is the shortest path: open the iMessage plugin's settings,
-pick the provider, and fill in its fields. It stores them in the credential
-store and restarts the channel.
+Photon device login (step 1) already stored the pair. Skip this step unless
+they used the manual fallback or they picked Comms.
+
+The settings app is the shortest manual path: open the iMessage plugin's
+settings, pick the provider, and fill in its fields. It stores them in the
+credential store and restarts the channel.
 
 From a terminal instead:
 
 ```bash
-# Photon
-assistant credentials set --service imessage --field photon_project_id <id>
-assistant credentials set --service imessage --field photon_project_secret <secret>
-
 # Comms
 assistant credentials set --service imessage --field api_key <key>
 ```
@@ -93,8 +118,10 @@ reads like a bad address. The plugin registers a recipient on the first send,
 but a setup check is that first send, so it fails unless the number is allowed
 first.
 
-Storing the credentials (step 2) restarts the channel, which registers the
-webhook **and** allows every phone number already on the assistant's contacts.
+Storing the credentials (device login or step 2) is what lets the channel
+come up. Webhook mode then registers the endpoint and allows every phone
+number already on the assistant's contacts. Live mode allows the same
+contacts when ingress starts.
 If that list was empty, unreadable, or the number you want to text is not a
 contact yet, allow it by hand:
 

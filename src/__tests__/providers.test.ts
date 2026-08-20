@@ -202,7 +202,8 @@ describe("comms provider", () => {
 
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
-      expect(readiness.reason).toContain("credentials set");
+      expect(readiness.reason).toContain("Comms API key");
+      expect(readiness.reason).toContain("could not be read");
     }
   });
 

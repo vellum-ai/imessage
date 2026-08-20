@@ -58,8 +58,8 @@ beforeEach(() => {
   resetPluginState();
 });
 
-afterEach(() => {
-  stopIngress();
+afterEach(async () => {
+  await stopIngress();
   resetPluginState();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -181,8 +181,8 @@ describe("startChannelRuntime", () => {
 });
 
 describe("stopIngress", () => {
-  test("is safe when nothing is running", () => {
-    expect(() => stopIngress()).not.toThrow();
+  test("is safe when nothing is running", async () => {
+    await expect(stopIngress()).resolves.toBeUndefined();
   });
 
   test("leaves the provider in place so outbound still works", async () => {
@@ -191,7 +191,7 @@ describe("stopIngress", () => {
     await startChannelRuntime(
       IMessageConfigSchema.parse({ ingressMode: "webhook" }),
     );
-    stopIngress();
+    await stopIngress();
     expect(getProvider()?.id).toBe("photon");
   });
 });

@@ -267,6 +267,43 @@ describe("LiveIngress", () => {
     expect(calls).toBe(1);
   });
 
+  test("stop() waits for the current stream to close", async () => {
+    let closed = false;
+    const provider = stubProvider([]).provider;
+    provider.subscribeInbound = () => {
+      const abort = new AbortController();
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield record("m1", event("m1"));
+          await new Promise<void>((resolve) => {
+            abort.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+        },
+        async close() {
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          closed = true;
+          abort.abort();
+        },
+      };
+    };
+
+    const live = new LiveIngress({
+      provider,
+      storageDir: dir,
+      logger: SILENT_LOGGER,
+      sink: () => {},
+      sleep: () => new Promise(() => {}),
+    });
+
+    live.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await live.stop();
+
+    expect(closed).toBe(true);
+  });
+
   test("refuses a provider without live support", () => {
     const { provider } = stubProvider([], {
       supportsLive: false,

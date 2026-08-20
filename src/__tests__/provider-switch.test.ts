@@ -55,9 +55,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   setWebhookUrlResolverOverride(undefined);
-  stopIngress();
+  await stopIngress();
   resetPluginState();
   rmSync(dir, { recursive: true, force: true });
 });

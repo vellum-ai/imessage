@@ -24,6 +24,9 @@
  * body, and a delivery that is not a turn says so by replying without one.
  */
 
+import { readConfigView } from "./app-settings.ts";
+import type { IMessageConfig } from "./config.ts";
+import { pluginConfigPath } from "./plugin-paths.ts";
 import { getConfig, recordInboundProbe } from "./plugin-state.ts";
 import { resolveProvider } from "./providers/index.ts";
 import { describeError } from "./providers/error-detail.ts";
@@ -37,14 +40,29 @@ function json(status: number, body: unknown): Response {
   });
 }
 
+/**
+ * Config this delivery is judged against.
+ *
+ * `init` writes the resolved config into in-memory plugin state, but the host
+ * loads this route with a cache-busting query string (`file.ts?t=mtime`). That
+ * is a different module instance, so `getConfig()` is empty here even when the
+ * plugin is up. `config.json` is the same file either instance would have
+ * written. Read it when this instance never saw `init`.
+ *
+ * `durablePath` is for tests. Production always uses the plugin's own file.
+ */
+export function resolveWebhookConfig(
+  durablePath: string = pluginConfigPath(),
+): IMessageConfig {
+  return getConfig() ?? readConfigView(durablePath);
+}
+
 export async function handleProviderWebhook(
   providerId: ProviderId,
   request: Request,
+  durablePath?: string,
 ): Promise<Response> {
-  const config = getConfig();
-  if (!config) {
-    return json(503, { error: "plugin not initialized" });
-  }
+  const config = resolveWebhookConfig(durablePath);
   if (config.ingressMode !== "webhook") {
     // An approved-but-unused declaration should not be a live surface.
     return json(404, { error: "webhook ingress is not enabled" });

@@ -9,9 +9,13 @@
  * so nothing here checks a signature.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { handleProviderWebhook } from "../webhook-route.ts";
+import { handleProviderWebhook, resolveWebhookConfig } from "../webhook-route.ts";
 import { IMessageConfigSchema } from "../config.ts";
 import {
   getInboundProbe,
@@ -191,12 +195,70 @@ describe("handleProviderWebhook", () => {
     expect(response.status).toBe(404);
   });
 
-  test("an unloaded plugin reports 503 rather than dropping the delivery", async () => {
-    // 503 invites the provider's retry; a 200 would tell it the message landed.
+  test("empty in-memory state does not 503 a delivery", async () => {
+    // The host loads this route with `file.ts?t=mtime`, a different module
+    // instance than the one `init` populated. `getConfig()` is empty here
+    // even when the plugin is up. A 503 was the bug: comms.ping retried
+    // forever as "plugin not initialized". Durable config / defaults answer
+    // instead (404 when webhook ingress is off, 200 when it is on).
     const response = await handleProviderWebhook(
       "comms",
-      post(commsDelivery()),
+      post({ event: "comms.ping" }),
     );
-    expect(response.status).toBe(503);
+    expect(response.status).not.toBe(503);
+    expect(response.status).toBeGreaterThanOrEqual(200);
+    expect(response.status).toBeLessThan(500);
+  });
+});
+
+describe("resolveWebhookConfig", () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "imessage-webhook-config-"));
+    configPath = join(dir, "config.json");
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("reads provider and ingress from disk when this instance never saw init", () => {
+    writeFileSync(configPath, JSON.stringify({ provider: "comms" }), "utf-8");
+
+    const config = resolveWebhookConfig(configPath);
+
+    expect(config.provider).toBe("comms");
+    // Comms has no live stream, so the live default is webhook.
+    expect(config.ingressMode).toBe("webhook");
+  });
+
+  test("a comms ping answers from durable config when memory is empty", async () => {
+    writeFileSync(configPath, JSON.stringify({ provider: "comms" }), "utf-8");
+
+    const response = await handleProviderWebhook(
+      "comms",
+      post({ event: "comms.ping" }),
+      configPath,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await bodyOf(response)).toEqual({ ok: true, probe: "comms.ping" });
+  });
+
+  test("in-memory config wins over the durable file", () => {
+    writeFileSync(configPath, JSON.stringify({ provider: "comms" }), "utf-8");
+    setConfig(
+      IMessageConfigSchema.parse({
+        provider: "photon",
+        ingressMode: "webhook",
+      }),
+    );
+
+    expect(resolveWebhookConfig(configPath)).toMatchObject({
+      provider: "photon",
+      ingressMode: "webhook",
+    });
   });
 });

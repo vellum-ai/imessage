@@ -1,12 +1,16 @@
 /**
  * In-process handles the hooks, routes, and runtime share.
  *
- * `init` stashes the context and the resolved config; the webhook route reads
- * the provider to normalize a delivery; the provider route reaches the runtime
- * to restart ingress live; `shutdown` stops the worker.
+ * `init` stashes the context and the resolved config; the provider route
+ * reaches the runtime to restart ingress live; `shutdown` stops the worker.
  *
- * Nothing durable lives here — the poll cursor and live seen-ids are the
- * persistent state, and they belong to `cursor.ts` and `live-ingress.ts`.
+ * The webhook route does not treat this module as the source of config. The
+ * host loads routes with a cache-busting query string, which is a different
+ * instance of this file than the one `init` populated. Config that a delivery
+ * must see lives in `config.json` and is read from disk.
+ *
+ * Nothing else durable lives here. The poll cursor and live seen-ids belong
+ * to `cursor.ts` and `live-ingress.ts`.
  */
 
 import type { PluginChannelProvider } from "./channel/contract.ts";

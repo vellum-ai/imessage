@@ -29,7 +29,11 @@ import {
   getWebhookReport,
 } from "./plugin-state.ts";
 import { pluginConfigPath } from "./plugin-paths.ts";
-import { PROVIDER_IDS } from "./providers/types.ts";
+import {
+  PROVIDER_IDS,
+  unavailableProviderList,
+  unavailableProviderReason,
+} from "./providers/types.ts";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -67,6 +71,7 @@ export async function handleSettingsGet(): Promise<Response> {
   return json({
     config,
     providers: PROVIDER_IDS,
+    unavailableProviders: unavailableProviderList(),
     ingressModes: INGRESS_MODES,
     activeProvider: getProvider()?.id ?? null,
     credentials: await readCredentialStatus(),
@@ -266,6 +271,10 @@ export async function switchChannelProvider(
   | { ok: false; error: string }
 > {
   const previous = readConfigView(configPath);
+  const blocked = unavailableProviderReason(change.provider);
+  if (blocked && change.provider !== previous.provider) {
+    return { ok: false, error: blocked };
+  }
   const next = {
     ...previous,
     provider: change.provider,

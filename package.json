@@ -3,7 +3,7 @@
   "displayName": "iMessage",
   "version": "0.0.1",
   "private": true,
-  "description": "iMessage and SMS channel for the Vellum assistant, backed by a Photon or Comms by Osis line.",
+  "description": "iMessage and SMS channel for the Vellum assistant, backed by a Photon line.",
   "icon": "message-circle",
   "license": "MIT",
   "type": "module",

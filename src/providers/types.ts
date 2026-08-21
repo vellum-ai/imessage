@@ -30,6 +30,28 @@ import type { PluginInboundEvent } from "../channel/contract.ts";
 export const PROVIDER_IDS = ["photon", "comms"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
+/**
+ * Providers that are implemented but not offered for selection yet.
+ *
+ * The settings panel still lists them, disabled, with `reason` as the hover
+ * tooltip. The provider route refuses a switch onto one. An install that
+ * already names one keeps running.
+ */
+export const UNAVAILABLE_PROVIDERS = {
+  comms: "Coming soon",
+} as const satisfies Partial<Record<ProviderId, string>>;
+
+export function unavailableProviderReason(id: string): string | undefined {
+  return UNAVAILABLE_PROVIDERS[id as keyof typeof UNAVAILABLE_PROVIDERS];
+}
+
+export function unavailableProviderList(): { id: string; reason: string }[] {
+  return Object.entries(UNAVAILABLE_PROVIDERS).map(([id, reason]) => ({
+    id,
+    reason,
+  }));
+}
+
 /** Where an outbound message is addressed. */
 export type SendTarget = { to: string } | { conversationId: string };
 

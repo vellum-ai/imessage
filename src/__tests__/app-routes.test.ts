@@ -19,6 +19,7 @@ import { PROVIDER_IDS } from "../providers/types.ts";
 interface SettingsPayload {
   config: { provider: string; ingressMode: string };
   providers: string[];
+  unavailableProviders: { id: string; reason: string }[];
   ingressModes: string[];
   activeProvider: string | null;
   credentials: Record<string, { field: string; set: boolean }[]>;
@@ -46,6 +47,15 @@ describe("handleSettingsGet", () => {
     const payload = await settingsPayload();
     expect(payload.providers).toEqual([...PROVIDER_IDS]);
     expect(payload.ingressModes).toEqual([...INGRESS_MODES]);
+  });
+
+  test("marks Comms as coming soon so the panel can disable it", async () => {
+    // Comms is implemented but not selectable. The panel still lists it,
+    // disabled, and uses this reason as the hover tooltip.
+    const payload = await settingsPayload();
+    expect(payload.unavailableProviders).toEqual([
+      { id: "comms", reason: "Coming soon" },
+    ]);
   });
 
   test("reports credential state without ever returning a value", async () => {

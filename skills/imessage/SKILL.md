@@ -8,7 +8,7 @@ metadata:
     display-name: "iMessage"
 ---
 
-Sends a text message through the assistant's Comms line. Delivery is iMessage
+Sends a text message through the assistant's iMessage line. Delivery is iMessage
 where the recipient's handle supports it, SMS otherwise.
 
 ## When to send
@@ -26,10 +26,10 @@ decide.
 
 ## Prerequisites
 
-The Comms API key must be in the credential store. If a send fails with a
+The line's credentials must be in the credential store. If a send fails with a
 missing-credential or 401 error, load the **imessage-setup** skill to walk the
 user through getting one. If Photon refuses with `Target not allowed for this
-project`, that skill's `allow.ts` script registers the number — it is a project
+project`, that skill's `allow.ts` script registers the number. It is a project
 recipient-policy restriction, not a credential problem.
 
 ## How to send

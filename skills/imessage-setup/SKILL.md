@@ -1,6 +1,6 @@
 ---
 name: imessage-setup
-description: Set up the iMessage channel with the user's own Photon or Comms by Osis account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle.
+description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
 metadata:
   emoji: "💬"
   vellum:
@@ -8,9 +8,10 @@ metadata:
     display-name: "iMessage Setup"
 ---
 
-Connects the iMessage channel to the user's own line, from either
-[Photon](https://photon.codes) (the default) or [Comms by
-Osis](https://comms.osis.co).
+Connects the iMessage channel to the user's own [Photon](https://photon.codes)
+line. Comms by Osis is implemented but not offered yet. Do not collect a
+Comms API key, do not set `provider` to `comms`, and do not walk them through
+the Comms dashboard.
 
 ## Set expectations first
 
@@ -33,16 +34,9 @@ honest shape for now. Do not promise a provided line is coming.
 
 ## Pick a provider
 
-Either works. Ask which account they already have before creating one.
-
-| | Photon (default) | Comms by Osis |
-| --- | --- | --- |
-| Credentials | Project ID + project secret | One API key |
-| Sending | Mints a short-lived token, then sends over gRPC | One REST call |
-| Ingress | Live gRPC (default), webhook, or poll | Webhook or poll |
-
-Everything below covers Photon. For Comms, the shape is the same and only the
-two steps marked **Comms** differ.
+Photon is the only selectable provider. The settings app still lists Comms
+by Osis, disabled, with a "Coming soon" tooltip. If they ask for Comms, say
+it is coming soon and continue with Photon.
 
 ## 1. Create the line and get credentials
 
@@ -77,34 +71,14 @@ assistant credentials set --service imessage --field photon_project_id <id>
 assistant credentials set --service imessage --field photon_project_secret <secret>
 ```
 
-**Comms** — instead of the above: create a workspace at https://comms.osis.co,
-provision a line, and mint a Messages API key. Scopes the key needs:
-
-| Scope | Needed for |
-| --- | --- |
-| `comms_send` | Sending. Always required. |
-| `comms_read` | Poll ingress only. |
-| `comms_webhooks` | Registering the webhook endpoint. |
-
-Have them mint all three up front. **Scopes are fixed at creation** — a key
-missing one has to be replaced, not upgraded, so a second trip to the dashboard
-is the common failure of doing this piecemeal.
-
 ## 2. Store the credentials
 
 Photon device login (step 1) already stored the pair. Skip this step unless
-they used the manual fallback or they picked Comms.
+they used the manual fallback.
 
 The settings app is the shortest manual path: open the iMessage plugin's
-settings, pick the provider, and fill in its fields. It stores them in the
-credential store and restarts the channel.
-
-From a terminal instead:
-
-```bash
-# Comms
-assistant credentials set --service imessage --field api_key <key>
-```
+settings and fill in Photon's fields. It stores them in the credential store
+and restarts the channel.
 
 Never put a secret in `config.json` and never paste one into chat. The plugin
 reads them from the credential store at call time, so rotating one later needs

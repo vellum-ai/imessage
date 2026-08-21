@@ -15,12 +15,12 @@ threads.
 
 ## Bring your own line
 
-You supply the line, from either of two providers:
+You supply the line. Photon is the provider that is selectable today:
 
 | Provider | You need | Where |
 | --- | --- | --- |
 | **Photon** (default) | A project ID and project secret | [photon.codes](https://photon.codes) |
-| **Comms by Osis** | A Messages API key | [comms.osis.co](https://comms.osis.co) |
+| **Comms by Osis** | Coming soon | [comms.osis.co](https://comms.osis.co) |
 
 For Photon, the `imessage-setup` skill can connect the project through
 Photon's device login (approve a short code in the browser) and store the

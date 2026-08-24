@@ -154,7 +154,7 @@ const STYLES = `
   }
   .stack { display: grid; gap: 16px; }
   .field { display: grid; gap: 4px; }
-  .field > label, .field #provider-label {
+  .field > label {
     font-size: 13px;
     color: color-mix(in srgb, CanvasText 60%, transparent);
   }
@@ -162,32 +162,6 @@ const STYLES = `
     margin: 0;
     font-size: 13px;
     color: color-mix(in srgb, CanvasText 60%, transparent);
-  }
-  .choices { display: flex; gap: 8px; }
-  .choice {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-    background: color-mix(in srgb, CanvasText 4%, Canvas);
-    cursor: pointer;
-    text-align: center;
-    font-size: 14px;
-  }
-  .choice.selected { border-color: AccentColor; }
-  .choice.unavailable {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .choice input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-    pointer-events: none;
   }
   .field select, .field input {
     font: inherit;
@@ -597,47 +571,42 @@ function App(): React.ReactElement {
         ) : null}
         <div className="stack">
           <div className="field">
-            <span id="provider-label">Provider</span>
-            <div
-              className="choices"
-              role="radiogroup"
-              aria-labelledby="provider-label"
+            <label htmlFor="provider">Provider</label>
+            <select
+              id="provider"
+              value={draftProvider}
+              disabled={saving}
+              onChange={(event) => {
+                const next = event.target.value;
+                setDraftProvider(next);
+                setDrafts({});
+                if (next === "photon") {
+                  if (draftIngress !== "poll") {
+                    setDraftIngress("live");
+                  }
+                } else if (draftIngress === "live") {
+                  setDraftIngress("webhook");
+                }
+              }}
             >
               {options.map((option) => {
                 const reason = unavailable.get(option.id);
                 const selected = draftProvider === option.id;
                 const locked = Boolean(reason) && !selected;
                 return (
-                  <label
+                  <option
                     key={option.id}
-                    className={`choice${selected ? " selected" : ""}${
-                      reason ? " unavailable" : ""
-                    }`}
+                    value={option.id}
+                    disabled={locked}
                     title={reason}
                   >
-                    <input
-                      type="radio"
-                      name="provider"
-                      value={option.id}
-                      checked={selected}
-                      disabled={saving || locked}
-                      onChange={() => {
-                        setDraftProvider(option.id);
-                        setDrafts({});
-                        if (option.id === "photon") {
-                          if (draftIngress !== "poll") {
-                            setDraftIngress("live");
-                          }
-                        } else if (draftIngress === "live") {
-                          setDraftIngress("webhook");
-                        }
-                      }}
-                    />
-                    {option.displayName}
-                  </label>
+                    {locked
+                      ? `${option.displayName} (${reason})`
+                      : option.displayName}
+                  </option>
                 );
               })}
-            </div>
+            </select>
             {catalog ? <p className="note">{catalog.subtitle}</p> : null}
           </div>
 

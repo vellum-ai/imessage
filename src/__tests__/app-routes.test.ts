@@ -51,7 +51,7 @@ describe("handleSettingsGet", () => {
 
   test("marks Comms as coming soon so the panel can disable it", async () => {
     // Comms is implemented but not selectable. The panel still lists it,
-    // disabled, and uses this reason as the hover tooltip.
+    // disabled, and uses this reason as the option title.
     const payload = await settingsPayload();
     expect(payload.unavailableProviders).toEqual([
       { id: "comms", reason: "Coming soon" },

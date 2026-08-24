@@ -87,7 +87,9 @@ describe("ingress manifest", () => {
     // and in every access log along the way.
     for (const provider of PROVIDER_IDS) {
       const verification = routeFor(provider)?.verification;
-      expect(["hmac", "standard-webhooks"]).toContain(verification?.kind);
+      expect(verification?.kind === "hmac" || verification?.kind === "standard-webhooks").toBe(
+        true,
+      );
       expect(verification?.carrier).toBeUndefined();
     }
   });

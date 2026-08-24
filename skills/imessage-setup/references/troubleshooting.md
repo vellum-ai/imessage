@@ -49,10 +49,12 @@ cannot be added.
 **Sends work, nothing arrives** — in webhook mode, check the gateway's version
 before anything else: it has to read the verification descriptors in
 `channels/ingress.json`, and a gateway that predates them refuses every
-delivery with a 403 before the plugin sees it. Switching to live (Photon) or
-poll sidesteps the question entirely. In poll mode, check that the key carries
-`comms_read`. In live mode, check the plugin log for `live stream failed` or
-`waiting until the provider is ready`.
+delivery with a 403 before the plugin sees it. Linq's route is
+`standard-webhooks`; a gateway that only knows `hmac` 403s every Linq
+delivery. Switching to live (Photon) or poll sidesteps the question
+entirely. In poll mode, check that the key carries `comms_read` (Comms)
+or that the Linq token can list chats. In live mode, check the plugin
+log for `live stream failed` or `waiting until the provider is ready`.
 
 **`{"error":"Not Found"}` on every delivery** — that body is the gateway's, and
 it means the gateway found no servable route at that path. It says nothing more

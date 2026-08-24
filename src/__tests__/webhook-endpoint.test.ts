@@ -43,12 +43,16 @@ describe("resolveWebhookEndpoint", () => {
 
     const comms = await resolveWebhookEndpoint("comms");
     const photon = await resolveWebhookEndpoint("photon");
+    const linq = await resolveWebhookEndpoint("linq");
 
     expect(comms.ok && comms.url).toBe(
       `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-comms/`,
     );
     expect(photon.ok && photon.url).toBe(
       `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-photon/`,
+    );
+    expect(linq.ok && linq.url).toBe(
+      `https://host.example/webhooks/plugins/${CHANNEL_ID}/events-linq/`,
     );
   });
 
@@ -58,7 +62,7 @@ describe("resolveWebhookEndpoint", () => {
     // between there and here.
     writeConfig({ ingress: { publicBaseUrl: "https://host.example" } });
 
-    for (const provider of ["photon", "comms"] as const) {
+    for (const provider of ["photon", "comms", "linq"] as const) {
       const endpoint = await resolveWebhookEndpoint(provider);
       expect(endpoint.ok && endpoint.url).not.toContain("?");
     }

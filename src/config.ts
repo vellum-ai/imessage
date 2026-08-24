@@ -83,12 +83,20 @@ export const PROVIDER_CREDENTIALS: Record<
       secret: true,
     },
   ],
+  linq: [
+    {
+      field: "linq_api_key",
+      label: "API Token",
+      placeholder: "Enter your Linq API token",
+      secret: true,
+    },
+  ],
 };
 
 /**
  * Where each provider's inbound-webhook secret is stored.
  *
- * Not in `PROVIDER_CREDENTIALS`: nobody types these. Both providers issue one
+ * Not in `PROVIDER_CREDENTIALS`: nobody types these. Each provider issues one
  * during webhook registration, so the settings app must not offer a field for
  * a value the user has no way to know.
  *
@@ -100,6 +108,7 @@ export const PROVIDER_CREDENTIALS: Record<
 export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
   photon: "photon_webhook_secret",
   comms: "comms_webhook_secret",
+  linq: "linq_webhook_secret",
 };
 
 /**
@@ -107,8 +116,8 @@ export const WEBHOOK_SECRET_FIELDS: Record<ProviderId, string> = {
  *
  * `live` is the default on Photon: it holds the provider's long-lived gRPC
  * connection (the same channel send already uses) and reads inbound off it.
- * That needs no public URL and no webhook secret. Comms has no such plane, so
- * a Comms config that names `live` is read as `webhook`.
+ * That needs no public URL and no webhook secret. Comms and Linq have no
+ * such plane, so a config that names `live` on either is read as `webhook`.
  *
  * `webhook` is the provider pushing over HTTP. Signature verification belongs
  * to the gateway, so the route only ever sees deliveries the gateway already
@@ -131,7 +140,7 @@ export const IMessageConfigSchema = z
       .enum(PROVIDER_IDS)
       .default("photon")
       .describe(
-        "Which provider backs the line: 'photon' (your own Photon project, the default) or 'comms' (your own Comms by Osis account).",
+        "Which provider backs the line: 'photon' (your own Photon project, the default), 'comms' (your own Comms by Osis account), or 'linq' (your own Linq account).",
       ),
     ingressMode: z
       .enum(INGRESS_MODES)
@@ -148,7 +157,7 @@ export const IMessageConfigSchema = z
       .describe("Delay between polls, in milliseconds. Only used in poll mode."),
   })
   .transform((config) => {
-    if (config.provider === "comms" && config.ingressMode === "live") {
+    if (config.provider !== "photon" && config.ingressMode === "live") {
       return { ...config, ingressMode: "webhook" as const };
     }
     return config;
@@ -221,4 +230,9 @@ export async function resolveCredentialField(
 /** Read the Comms API key. */
 export async function resolveApiKey(): Promise<string> {
   return resolveCredentialField(API_KEY_FIELD, "The Comms API key");
+}
+
+/** Read the Linq Partner API token. */
+export async function resolveLinqApiKey(): Promise<string> {
+  return resolveCredentialField("linq_api_key", "The Linq API token");
 }

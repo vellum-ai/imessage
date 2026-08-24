@@ -6,7 +6,7 @@
  * Only the adapters under `src/providers/<id>/` know what a provider's
  * payloads look like.
  *
- * Two providers, both bring-your-own — the user holds the account and the
+ * Three providers, all bring-your-own. The user holds the account and the
  * billing either way:
  *
  * - `photon` (default) — a Photon (Spectrum) project. Two planes rather than
@@ -17,6 +17,8 @@
  *   there are two hosts.
  * - `comms` — a Comms by Osis workspace, API key, and line. One REST API for
  *   both directions.
+ * - `linq` — a Linq Partner API v3 token and line. One REST API for both
+ *   directions, with Standard Webhooks inbound.
  *
  * The seam also earns its keep independently of the entry count: no official
  * iMessage API exists, every vendor runs a macOS fleet under a
@@ -27,7 +29,7 @@
 
 import type { PluginInboundEvent } from "../channel/contract.ts";
 
-export const PROVIDER_IDS = ["photon", "comms"] as const;
+export const PROVIDER_IDS = ["photon", "comms", "linq"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /**
@@ -149,8 +151,8 @@ export interface MessagingProvider {
    * Whether `subscribeInbound` is usable on this provider.
    *
    * Photon holds a long-lived gRPC stream on the message plane and can push
-   * inbound events over it. Comms has no such connection, so live ingress is
-   * Photon-only.
+   * inbound events over it. Comms and Linq have no such connection, so live
+   * ingress is Photon-only.
    */
   readonly supportsLive: boolean;
 

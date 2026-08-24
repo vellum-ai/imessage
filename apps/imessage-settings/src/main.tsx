@@ -77,6 +77,18 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       linkLabel: "Open Comms by Osis",
     },
   },
+  {
+    id: "linq",
+    displayName: "Linq",
+    subtitle:
+      "Your own Linq line. One API token covers sending and receiving over iMessage, RCS, and SMS.",
+    credentialsGuide: {
+      description:
+        "Sign in to the Linq dashboard, generate a V3 API token under API, Overview, and paste it here. Sandbox accounts can send a limited number of messages per day.",
+      url: "https://dashboard.linqapp.com/sandbox",
+      linkLabel: "Open Linq Sandbox",
+    },
+  },
 ];
 
 /**

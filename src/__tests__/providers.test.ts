@@ -100,9 +100,10 @@ describe("provider registry", () => {
     expect(resolveProvider({ config }).id).toBe("photon");
   });
 
-  test("knows both providers", () => {
+  test("knows every registered provider", () => {
     expect(PROVIDER_IDS).toContain("comms");
     expect(PROVIDER_IDS).toContain("photon");
+    expect(PROVIDER_IDS).toContain("linq");
   });
 
   test("builds photon from config alone", () => {
@@ -1339,6 +1340,18 @@ describe("webhook registration", () => {
         "https://host.example/events-comms/",
       ),
     ).toBe(true);
+    expect(
+      sameWebhookUrl(
+        "https://host.example/events-linq/?version=2026-02-03",
+        "https://host.example/events-linq?version=2026-02-03",
+      ),
+    ).toBe(true);
+    expect(
+      sameWebhookUrl(
+        "https://host.example/events-linq/?version=2026-02-03",
+        "https://host.example/events-linq/?version=2025-01-01",
+      ),
+    ).toBe(false);
   });
 
   test("comms prefers the exact url when a duplicate already exists", async () => {

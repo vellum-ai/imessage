@@ -87,7 +87,7 @@ describe("ingress manifest", () => {
     // and in every access log along the way.
     for (const provider of PROVIDER_IDS) {
       const verification = routeFor(provider)?.verification;
-      expect(verification?.kind).toBe("hmac");
+      expect(["hmac", "standard-webhooks"]).toContain(verification?.kind);
       expect(verification?.carrier).toBeUndefined();
     }
   });
@@ -131,6 +131,17 @@ describe("ingress manifest", () => {
     expect(comms?.freshness).toBeUndefined();
   });
 
+  test("Linq's route declares Standard Webhooks", () => {
+    // Linq signs `{webhook-id}.{webhook-timestamp}.{body}` with a
+    // `whsec_`-prefixed key and sends `webhook-signature: v1,<base64>`.
+    // That scheme is a gateway `standard-webhooks` kind, not a hand-built
+    // HMAC payload list.
+    const linq = routeFor("linq")?.verification;
+
+    expect(linq?.kind).toBe("standard-webhooks");
+    expect(linq?.secret?.field).toBe("linq_webhook_secret");
+  });
+
   test("every route declares that its replies deliver messages", () => {
     // Without this the gateway forwards the delivery, returns whatever this
     // plugin answered, and the message goes no further — which is the inbound
@@ -163,12 +174,17 @@ describe("ingress manifest", () => {
       const fields = route.inbound.fields;
       expect(fields).toBeDefined();
       for (const required of [
-        "content",
         "conversationExternalId",
         "externalMessageId",
         "actorExternalId",
       ]) {
         expect(fields?.[required as keyof typeof fields]).toBeDefined();
+      }
+      // Content is a scalar path. Linq puts text in `data.parts`, an array
+      // the gateway will not index, so that route omits it and admission
+      // reads empty text. The plugin extracts the parts after the gate.
+      if (route.path !== "events-linq") {
+        expect(fields?.content).toBeDefined();
       }
     }
   });

@@ -1,11 +1,11 @@
 /**
  * The public URL a provider should deliver webhooks to.
  *
- * **One route per provider**, not one shared route: `events-photon` and
- * `events-comms`. Which provider signed a delivery decides how it must be
- * verified, and the gateway only reads its own static manifest — so the
- * provider has to be identifiable from the path rather than from this plugin's
- * config.
+ * **One route per provider**, not one shared route: `events-photon`,
+ * `events-comms`, and `events-linq`. Which provider signed a delivery decides
+ * how it must be verified, and the gateway only reads its own static
+ * manifest — so the provider has to be identifiable from the path rather
+ * than from this plugin's config.
  *
  * **The base is the host's to decide, not this plugin's.** Composing one from
  * `ingress.publicBaseUrl` is the obvious move and it is wrong in the case that
@@ -136,11 +136,13 @@ function endpointFromConfig(provider: ProviderId): WebhookEndpoint {
 }
 
 /**
- * Drop a trailing slash so two spellings of the same path compare equal.
+ * Drop a trailing slash from the path so two spellings compare equal.
+ *
+ * The slash is stripped from the path only. A query or fragment after it
+ * is kept, so `/events-linq/?version=` and `/events-linq?version=` match.
  */
 function withoutTrailingSlash(url: string): string {
-  if (url.includes("?") || url.includes("#")) return url;
-  return url.replace(/\/+$/, "");
+  return url.replace(/\/+(?=[?#]|$)/, "");
 }
 
 /**
@@ -149,8 +151,8 @@ function withoutTrailingSlash(url: string): string {
  * Vellum's managed callback layer is Django: a slashless path 301s onto the
  * trailing-slash spelling, and following that redirect turns a POST into a
  * GET with no body — which then 404s, before HMAC or the plugin ever run.
- * Registering the trailing-slash URL is what makes Photon (and Comms) POST
- * at the canonical path instead of walking that redirect.
+ * Registering the trailing-slash URL is what makes Photon (and the other
+ * providers) POST at the canonical path instead of walking that redirect.
  *
  * The gateway already serves both spellings (`findDeclaredRoute` ignores one
  * trailing slash). Query-bearing URLs are left alone so this cannot cut into

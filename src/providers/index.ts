@@ -13,6 +13,7 @@
  */
 
 import { createCommsProvider } from "./comms/adapter.ts";
+import { createLinqProvider } from "./linq/adapter.ts";
 import { createPhotonProvider } from "./photon/adapter.ts";
 import type { MessagingProvider } from "./types.ts";
 import { PROVIDER_IDS } from "./types.ts";
@@ -40,6 +41,8 @@ export function resolveProvider(
       return createPhotonProvider(opts.photonMessageClient);
     case "comms":
       return createCommsProvider();
+    case "linq":
+      return createLinqProvider();
     default:
       // Unreachable through the config schema, which validates against
       // `PROVIDER_IDS`. Reachable if a caller hands over a config it built

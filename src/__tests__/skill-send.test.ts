@@ -20,6 +20,7 @@ const credentials: Record<string, string> = {
   photon_project_id: "proj_1",
   photon_project_secret: "shh",
   api_key: "sk-comms",
+  linq_api_key: "linq-token",
 };
 
 mock.module("@vellumai/plugin-api", () => ({

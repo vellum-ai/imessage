@@ -32,6 +32,25 @@ describe("resolveConfig", () => {
     expect(config.ingressMode).toBe("webhook");
   });
 
+  test("reads linq plus live as webhook", () => {
+    const { config } = resolveConfig({
+      provider: "linq",
+      ingressMode: "live",
+    });
+    expect(config.provider).toBe("linq");
+    expect(config.ingressMode).toBe("webhook");
+  });
+
+  test("accepts an explicit linq webhook", () => {
+    const { config, warnings } = resolveConfig({
+      provider: "linq",
+      ingressMode: "webhook",
+    });
+    expect(config.provider).toBe("linq");
+    expect(config.ingressMode).toBe("webhook");
+    expect(warnings).toEqual([]);
+  });
+
   test("accepts poll mode for deployments with no public ingress", () => {
     const { config } = resolveConfig({
       provider: "comms",

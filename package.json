@@ -12,7 +12,8 @@
     "sms",
     "channel",
     "comms",
-    "osis"
+    "osis",
+    "linq"
   ],
   "peerDependencies": {
     "@vellumai/plugin-api": "^0.10.3"

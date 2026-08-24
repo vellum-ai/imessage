@@ -15,11 +15,13 @@ threads.
 
 ## Bring your own line
 
-You supply the line. Photon is the provider that is selectable today:
+You supply the line. Photon is the default. Linq is selectable for a
+prototype:
 
 | Provider | You need | Where |
 | --- | --- | --- |
 | **Photon** (default) | A project ID and project secret | [photon.codes](https://photon.codes) |
+| **Linq** | A V3 API token | [dashboard.linqapp.com/sandbox](https://dashboard.linqapp.com/sandbox) |
 | **Comms by Osis** | Coming soon | [comms.osis.co](https://comms.osis.co) |
 
 For Photon, the `imessage-setup` skill can connect the project through
@@ -41,7 +43,7 @@ The `imessage-setup` skill walks through the whole thing, including inbound.
 
 ## Provider APIs
 
-Both vendors have shapes that cost real time to rediscover, so they are written
+Each vendor has shapes that cost real time to rediscover, so they are written
 down here rather than left in the code.
 
 **Photon runs two planes with two protocols.** The control plane
@@ -78,6 +80,21 @@ using a secret returned when the webhook is registered. Its published docs
 specify the message object as `{ id, body, direction }` only, so anything
 beyond that is marked `UNVERIFIED` in `src/providers/comms/schemas.ts` and is
 optional: a wrong guess degrades rather than drops a message.
+
+**Linq** (`api.linqapp.com/api/partner/v3`) is one REST API with bearer auth.
+A cold send is `POST /messages` with `to` and no `from`, so Linq picks the
+line. A reply to a known chat is `POST /chats/{id}/messages`. Idempotency
+lives inside the `message` object (`idempotency_key`), not as a header.
+Inbound is webhook-only in practice: there is no live stream, and listing
+messages is per-chat. Webhooks are Standard Webhooks
+(`webhook-id` / `webhook-timestamp` / `webhook-signature`) signed with a
+`whsec_` secret issued once at subscription create. The registration URL
+pins `?version=2026-02-03` so the envelope stays
+`data.sender_handle` / `data.chat.id`. A lost secret means delete and
+re-register. Sandbox accounts are capped at 100 messages per day.
+Inbound webhook verification uses the gateway's `standard-webhooks` kind;
+a gateway that only knows `hmac` will 403 every Linq delivery. Polling
+still receives without that.
 
 ## Development
 

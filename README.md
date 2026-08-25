@@ -88,7 +88,9 @@ lives inside the `message` object (`idempotency_key`), not as a header.
 Inbound is webhook-only in practice: there is no live stream, and listing
 messages is per-chat. Webhooks are Standard Webhooks
 (`webhook-id` / `webhook-timestamp` / `webhook-signature`) signed with a
-`whsec_` secret issued once at subscription create. The registration URL
+`whsec_` secret issued once at subscription create. Linq also sends the
+deprecated `X-Webhook-Signature` / `X-Webhook-Timestamp` pair on every
+delivery (hex HMAC-SHA256 of `{timestamp}.{body}`). The registration URL
 pins `?version=2026-02-03` so the envelope stays
 `data.sender_handle` / `data.chat.id`. A lost secret means delete and
 re-register. Sandbox accounts are capped at 100 messages per day.

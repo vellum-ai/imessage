@@ -56,6 +56,14 @@ entirely. In poll mode, check that the key carries `comms_read` (Comms)
 or that the Linq token can list chats. In live mode, check the plugin
 log for `live stream failed` or `waiting until the provider is ready`.
 
+**Linq 403 with `rejection: missing_signature`.** The route is approved and
+the secret is present; the gateway never saw `webhook-signature`. Linq
+sends that header and the deprecated `X-Webhook-Signature` /
+`X-Webhook-Timestamp` pair on every delivery. Some managed callback hops
+drop the unprefixed spec names and keep the `X-*` pair. A gateway that
+accepts the legacy pair will verify those; one that only reads the spec
+headers 403s. The same log line lists which signature headers arrived.
+
 **`{"error":"Not Found"}` on every delivery** — that body is the gateway's, and
 it means the gateway found no servable route at that path. It says nothing more
 on purpose: the path is reachable by anyone on the internet, so a route held

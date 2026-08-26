@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  imessageIdentityFromContacts,
+  loadGuardianImessageIdentity,
   loadGuardianPhoneNumber,
   phoneNumbersFromContacts,
 } from "../channel/contact-phones.ts";
@@ -155,5 +157,148 @@ describe("loadGuardianPhoneNumber", () => {
       ],
     }));
     expect(phone).toBeUndefined();
+  });
+});
+
+describe("imessageIdentityFromContacts", () => {
+  test("reads a discovered iMessage channel", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              {
+                type: "imessage",
+                address: "+15551234567",
+                status: "unverified",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ address: "+15551234567", verified: false });
+  });
+
+  test("reads the inbound plugin identity", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              {
+                type: "plugin",
+                address: "imessage:+15551234567",
+                status: "active",
+                verifiedVia: "manual",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ address: "+15551234567", verified: true });
+  });
+
+  test("does not treat a Phone Calling number as iMessage", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              { type: "phone", address: "+15551234567", status: "active" },
+            ],
+          },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  test("prefers a verified inbound row over an unverified discovered row", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              {
+                type: "imessage",
+                address: "+15550000001",
+                status: "unverified",
+              },
+              {
+                type: "plugin",
+                address: "imessage:+15551234567",
+                status: "active",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ address: "+15551234567", verified: true });
+  });
+
+  test("reads the CLI shape", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              {
+                channel: "imessage",
+                externalUserId: "+15551234567",
+                status: "active",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ address: "+15551234567", verified: true });
+  });
+
+  test("skips a plugin row that is not this channel", () => {
+    expect(
+      imessageIdentityFromContacts({
+        contacts: [
+          {
+            channels: [
+              { type: "plugin", address: "meeting-bot:room-42", status: "active" },
+            ],
+          },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("loadGuardianImessageIdentity", () => {
+  test("returns the guardian iMessage handle", async () => {
+    const identity = await loadGuardianImessageIdentity(async () => ({
+      ok: true,
+      contacts: [
+        {
+          displayName: "Ada",
+          role: "guardian",
+          channels: [
+            { type: "phone", address: "+15557654321", status: "active" },
+            { type: "imessage", address: "+15551234567", status: "active" },
+          ],
+        },
+      ],
+    }));
+    expect(identity).toEqual({ address: "+15551234567", verified: true });
+  });
+
+  test("returns nothing when the guardian only has Phone Calling", async () => {
+    const identity = await loadGuardianImessageIdentity(async () => ({
+      ok: true,
+      contacts: [
+        {
+          displayName: "Ada",
+          role: "guardian",
+          channels: [
+            { type: "phone", address: "+15551234567", status: "active" },
+          ],
+        },
+      ],
+    }));
+    expect(identity).toBeUndefined();
   });
 });

@@ -15,12 +15,18 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { phoneFromAddress } from "./identity.ts";
+import { normalizeHandle, phoneFromAddress } from "./identity.ts";
 
 const execFileAsync = promisify(execFile);
 
 /** Channel types whose address is a phone number. */
 const PHONE_CHANNEL_TYPES = new Set(["phone", "imessage", "sms", "whatsapp"]);
+
+/** Contacts-page / prompt type for this plugin's discovered channel. */
+const IMESSAGE_CHANNEL_TYPE = "imessage";
+
+/** Inbound trust stores the same handle as `imessage:+E.164` on type `plugin`. */
+const IMESSAGE_INBOUND_PREFIX = "imessage:";
 
 /** Channel statuses that mean "do not message this person". */
 const SKIP_STATUSES = new Set(["blocked", "revoked"]);
@@ -114,11 +120,141 @@ export async function loadGuardianPhoneNumber(
   return phoneNumbersFromContacts(await listJson())[0];
 }
 
+/** A guardian iMessage handle already on the contact graph. */
+export interface GuardianImessageIdentity {
+  address: string;
+  verified: boolean;
+}
+
+/**
+ * The guardian's iMessage identity, if one is already stored.
+ *
+ * Looks at type `imessage` and at the inbound `(plugin, imessage:…)` row.
+ * A Phone Calling number does not count: inbound trust is a different
+ * (type, address) key, so a verified phone is still unknown on iMessage.
+ *
+ * `listJson` is the test seam. Production reads
+ * `assistant contacts list --role guardian --json`.
+ */
+export async function loadGuardianImessageIdentity(
+  listJson: () => Promise<unknown> = listGuardianContactsJson,
+): Promise<GuardianImessageIdentity | undefined> {
+  return imessageIdentityFromContacts(await listJson());
+}
+
+/**
+ * First iMessage identity on a contacts-list payload.
+ *
+ * Prefers a verified row when both an unverified discovered channel and a
+ * verified inbound row exist. Same HTTP and CLI channel shapes as
+ * {@link phoneNumbersFromContacts}.
+ */
+export function imessageIdentityFromContacts(
+  payload: unknown,
+): GuardianImessageIdentity | undefined {
+  const contacts = contactsOf(payload);
+  let fallback: GuardianImessageIdentity | undefined;
+
+  for (const contact of contacts) {
+    if (!contact || typeof contact !== "object") {
+      continue;
+    }
+    const channels = (contact as { channels?: unknown }).channels;
+    if (!Array.isArray(channels)) {
+      continue;
+    }
+
+    for (const channel of channels) {
+      const identity = imessageIdentityFromChannel(channel);
+      if (!identity) {
+        continue;
+      }
+      if (identity.verified) {
+        return identity;
+      }
+      if (!fallback) {
+        fallback = identity;
+      }
+    }
+  }
+
+  return fallback;
+}
+
 function contactsOf(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
   const contacts = (payload as { contacts?: unknown }).contacts;
   return Array.isArray(contacts) ? contacts : [];
+}
+
+function imessageIdentityFromChannel(
+  channel: unknown,
+): GuardianImessageIdentity | undefined {
+  if (!channel || typeof channel !== "object") {
+    return undefined;
+  }
+  const row = channel as {
+    status?: unknown;
+    policy?: unknown;
+    type?: unknown;
+    channel?: unknown;
+    address?: unknown;
+    externalUserId?: unknown;
+    externalChatId?: unknown;
+  };
+
+  const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
+  if (SKIP_STATUSES.has(status)) {
+    return undefined;
+  }
+  if (typeof row.policy === "string" && row.policy.toLowerCase() === "deny") {
+    return undefined;
+  }
+
+  const kind =
+    typeof row.type === "string"
+      ? row.type.toLowerCase()
+      : typeof row.channel === "string"
+        ? row.channel.toLowerCase()
+        : "";
+  const isDiscovered = kind === IMESSAGE_CHANNEL_TYPE;
+  const isInbound = kind === "plugin";
+  if (!isDiscovered && !isInbound) {
+    return undefined;
+  }
+
+  const candidates = [row.address, row.externalUserId, row.externalChatId];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+    const handle = handleFromImessageAddress(candidate, isInbound);
+    if (!handle) {
+      continue;
+    }
+    return { address: handle, verified: channelLooksVerified(status) };
+  }
+  return undefined;
+}
+
+function handleFromImessageAddress(
+  raw: string,
+  requirePrefix: boolean,
+): string | undefined {
+  const trimmed = raw.trim();
+  const prefixed = trimmed.toLowerCase().startsWith(IMESSAGE_INBOUND_PREFIX);
+  if (requirePrefix && !prefixed) {
+    return undefined;
+  }
+  const unscoped = prefixed
+    ? trimmed.slice(IMESSAGE_INBOUND_PREFIX.length)
+    : trimmed;
+  return normalizeHandle(unscoped);
+}
+
+function channelLooksVerified(status: string): boolean {
+  return status === "verified" || status === "active";
 }
 
 function phoneFromChannel(channel: unknown): string | undefined {

@@ -1,6 +1,6 @@
 ---
 name: imessage-setup
-description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. After the provider is stored, save the user's phone on their guardian contact if it is missing. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
+description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. After the provider is stored, save and verify the user's iMessage handle on their guardian contact if it is missing. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
 metadata:
   emoji: "💬"
   vellum:
@@ -88,44 +88,62 @@ Never put a secret in `config.json` and never paste one into chat. The plugin
 reads them from the credential store at call time, so rotating one later needs
 no restart.
 
-## 3. Save the user's phone on the guardian contact
+## 3. Save and verify the user's iMessage handle
 
-Inbound from a number that is not on the guardian contact is classified
-unknown and denied under the default plugin floor. A number that only
-appeared in chat history is not on the contact graph.
+Inbound from a handle that is not a verified iMessage identity on the
+guardian is classified unknown and denied under the default plugin floor.
+A number that is only verified on Phone Calling is still unknown on
+iMessage. A number that only appeared in chat history is not on the
+contact graph.
 
 After the provider is stored, check:
 
 ```bash
-bun skills/imessage-setup/scripts/guardian-phone.ts
+bun skills/imessage-setup/scripts/guardian-imessage.ts
 ```
 
-The script prints `{ "found": true, "phone": "+15551234567" }` or
-`{ "found": false }`. If `found` is true, say the number is already on
-the contact record and skip the rest of this step.
+The script prints one of:
 
-If `found` is false, explain that texts from their phone will not be
-recognized until the number is saved. Do **not** ask them to type the
-number in chat. Open the contact prompt:
+- `{ "found": true, "address": "+15551234567", "verified": true }` — already
+  attested. Say so and skip the rest of this step.
+- `{ "found": true, "address": "+15551234567", "verified": false }` — stored
+  but not attested. Open the prompt below with `--default-value` set to
+  `address`.
+- `{ "found": false, "suggested": "+15551234567" }` — no iMessage row yet.
+  A Phone Calling number is only a prefill. Open the prompt with
+  `--default-value` set to `suggested` unless this conversation already
+  has their number.
+- `{ "found": false }` — nothing to prefill. Open the prompt. If this
+  conversation already has their number, pass it as `--default-value` in
+  E.164. Do not invent a number.
+
+Explain that texts from their phone will not be recognized until this
+handle is saved and verified. Do **not** ask them to type the number in
+chat.
 
 ```bash
 assistant contacts prompt \
-  --channel phone \
+  --channel imessage \
   --role guardian \
-  --label "Your phone number" \
+  --verify \
+  --label "Your iMessage number" \
   --description "Save the number you text from so the assistant can recognize you on this line." \
   --placeholder "+15551234567"
 ```
 
-If this conversation already has their number, pass it as `--default-value`
-in E.164 so they can confirm it. Do not invent a number.
+`--verify` attests the submitted handle the same way Contacts Verify me
+does. That writes the inbound identity the plugin floor looks up.
+Without it the address is stored unverified and inbound stays unknown.
 
 `--role guardian` binds the channel to the existing guardian contact.
-The address is stored unverified; verification is a separate step.
+
+If `--verify` is rejected as an unknown flag, this assistant is older
+than the verified-prompt flow. Run the same command without `--verify`,
+then ask them to open Contacts and click **Verify me** next to iMessage.
 
 If they dismiss the prompt or it fails, continue setup. Warn that inbound
-from their phone will stay unknown until the number is on the guardian
-contact. Do not retry the prompt unless they ask.
+from their phone will stay unknown until the iMessage handle is on the
+guardian contact and verified. Do not retry the prompt unless they ask.
 
 ## 4. Allow the people Photon may message
 

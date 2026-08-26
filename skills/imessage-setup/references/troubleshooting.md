@@ -27,19 +27,22 @@ the sender. The plugin channel defaults to `guardian_only`. A number that
 is not on the guardian contact is `unknown` and is dropped. A number that
 only appeared in conversation history is not on the contact graph.
 
-Check, then prompt if missing:
+Check, then prompt if the iMessage identity is missing or unverified:
 
 ```bash
-bun skills/imessage-setup/scripts/guardian-phone.ts
+bun skills/imessage-setup/scripts/guardian-imessage.ts
 assistant contacts prompt \
-  --channel phone \
+  --channel imessage \
   --role guardian \
-  --label "Your phone number" \
+  --verify \
+  --label "Your iMessage number" \
   --placeholder "+15551234567"
 ```
 
-Do not ask them to paste the number in chat. If this conversation already
-has it, pass `--default-value` in E.164.
+Do not ask them to paste the number in chat. If the script printed
+`address` or `suggested`, or this conversation already has the number,
+pass it as `--default-value` in E.164. A Phone Calling number alone is
+not enough: inbound trust looks up the iMessage identity.
 
 **Photon: "Target not allowed for this project"** — a Photon project may only
 message people it knows, and the recipient is not one of them yet. This is a

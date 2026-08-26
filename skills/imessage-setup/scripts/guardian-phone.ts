@@ -5,8 +5,8 @@
  *   bun skills/imessage-setup/scripts/guardian-phone.ts
  *
  * Prints one JSON object: `{ "found": true, "phone": "+15551234567" }`
- * or `{ "found": false }`. The setup skill uses this to decide whether
- * to open `assistant contacts prompt`.
+ * or `{ "found": false }`. Photon's allow step uses this. It is not the
+ * iMessage identity check: that is `guardian-imessage.ts`.
  */
 
 import { loadGuardianPhoneNumber } from "../../../src/channel/contact-phones.ts";

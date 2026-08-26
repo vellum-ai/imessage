@@ -123,9 +123,14 @@ in E.164 so they can confirm it. Do not invent a number.
 `--role guardian` binds the channel to the existing guardian contact.
 The address is stored unverified; verification is a separate step.
 
+Then ask them to open Contacts and click **Verify me** next to iMessage.
+That is the same one-click attest Phone Calling already uses. It marks
+their number as the iMessage identity inbound trust looks up. A number
+that is only verified on Phone Calling is still unknown on iMessage.
+
 If they dismiss the prompt or it fails, continue setup. Warn that inbound
 from their phone will stay unknown until the number is on the guardian
-contact. Do not retry the prompt unless they ask.
+contact and iMessage is verified. Do not retry the prompt unless they ask.
 
 ## 4. Allow the people Photon may message
 

@@ -69,12 +69,14 @@ export async function loadContactPhoneNumbers(
 }
 
 /** `assistant contacts list --json`, parsed. */
-export async function listContactsJson(): Promise<unknown> {
+export async function listContactsJson(
+  extraArgs: readonly string[] = [],
+): Promise<unknown> {
   let stdout: string;
   try {
     const result = await execFileAsync(
       "assistant",
-      ["contacts", "list", "--json", "--limit", "100"],
+      ["contacts", "list", "--json", "--limit", "100", ...extraArgs],
       { timeout: LIST_CONTACTS_TIMEOUT_MS, encoding: "utf8" },
     );
     stdout = result.stdout;
@@ -93,6 +95,23 @@ export async function listContactsJson(): Promise<unknown> {
   } catch {
     throw new Error("assistant contacts list returned a body that is not JSON");
   }
+}
+
+/** Guardian contacts only. The setup skill uses this before prompting. */
+export async function listGuardianContactsJson(): Promise<unknown> {
+  return listContactsJson(["--role", "guardian"]);
+}
+
+/**
+ * The first usable phone number on the guardian contact, if any.
+ *
+ * `listJson` is the test seam. Production reads
+ * `assistant contacts list --role guardian --json`.
+ */
+export async function loadGuardianPhoneNumber(
+  listJson: () => Promise<unknown> = listGuardianContactsJson,
+): Promise<string | undefined> {
+  return phoneNumbersFromContacts(await listJson())[0];
 }
 
 function contactsOf(payload: unknown): unknown[] {

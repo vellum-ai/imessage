@@ -1,6 +1,6 @@
 ---
 name: imessage-setup
-description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
+description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. After the provider is stored, save the user's phone on their guardian contact if it is missing. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
 metadata:
   emoji: "💬"
   vellum:
@@ -88,7 +88,46 @@ Never put a secret in `config.json` and never paste one into chat. The plugin
 reads them from the credential store at call time, so rotating one later needs
 no restart.
 
-## 3. Allow the people Photon may message
+## 3. Save the user's phone on the guardian contact
+
+Inbound from a number that is not on the guardian contact is classified
+unknown and denied under the default plugin floor. A number that only
+appeared in chat history is not on the contact graph.
+
+After the provider is stored, check:
+
+```bash
+bun skills/imessage-setup/scripts/guardian-phone.ts
+```
+
+The script prints `{ "found": true, "phone": "+15551234567" }` or
+`{ "found": false }`. If `found` is true, say the number is already on
+the contact record and skip the rest of this step.
+
+If `found` is false, explain that texts from their phone will not be
+recognized until the number is saved. Do **not** ask them to type the
+number in chat. Open the contact prompt:
+
+```bash
+assistant contacts prompt \
+  --channel phone \
+  --role guardian \
+  --label "Your phone number" \
+  --description "Save the number you text from so the assistant can recognize you on this line." \
+  --placeholder "+15551234567"
+```
+
+If this conversation already has their number, pass it as `--default-value`
+in E.164 so they can confirm it. Do not invent a number.
+
+`--role guardian` binds the channel to the existing guardian contact.
+The address is stored unverified; verification is a separate step.
+
+If they dismiss the prompt or it fails, continue setup. Warn that inbound
+from their phone will stay unknown until the number is on the guardian
+contact. Do not retry the prompt unless they ask.
+
+## 4. Allow the people Photon may message
 
 Photon will only message numbers the project already knows. Anyone else is
 refused with `Target not allowed for this project` — a policy answer that
@@ -115,19 +154,20 @@ bun skills/imessage-setup/scripts/allow.ts --to "+15551234567"
 is rejected rather than guessed at. Linq and Comms have no such restriction.
 Skip this step there.
 
-## 4. Confirm sending works
+## 5. Confirm sending works
 
 ```bash
 bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup check from your assistant."
 ```
 
-Have the user confirm it arrived. The script sends through the same provider
+If step 3 found or saved a number, use that as `--to`. Have the user confirm
+it arrived. The script sends through the same provider
 adapter the channel uses, over whichever line `config.json` names, so this
 isolates a credential problem from an ingress problem on either provider. If
 Photon still answers `Target not allowed for this project`, the number was not
-allowed — go back to step 3 rather than rotating credentials.
+allowed — go back to step 4 rather than rotating credentials.
 
-## 5. Inbound
+## 6. Inbound
 
 **Use polling.** It is the ingress that works end to end today:
 
@@ -144,7 +184,7 @@ start, pointing the provider at its own route,
 `/webhooks/plugins/imessage/events-<provider>`. The public base comes from the
 host — a managed platform callback route, or a configured public ingress — so
 there is nothing to compose or configure here. On Photon, that same start also
-allows the assistant's contact phone numbers (step 3); a number added as a
+allows the assistant's contact phone numbers (step 4); a number added as a
 contact later still needs `allow.ts`.
 
 Photon defaults to live gRPC (`ingressMode: "live"`) that reads inbound

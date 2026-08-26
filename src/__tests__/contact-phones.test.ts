@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { phoneNumbersFromContacts } from "../channel/contact-phones.ts";
+import {
+  loadGuardianPhoneNumber,
+  phoneNumbersFromContacts,
+} from "../channel/contact-phones.ts";
 
 describe("phoneNumbersFromContacts", () => {
   test("reads the HTTP/OpenAPI shape", () => {
@@ -117,5 +120,40 @@ describe("phoneNumbersFromContacts", () => {
     expect(phoneNumbersFromContacts({})).toEqual([]);
     expect(phoneNumbersFromContacts({ contacts: [] })).toEqual([]);
     expect(phoneNumbersFromContacts("nope")).toEqual([]);
+  });
+});
+
+describe("loadGuardianPhoneNumber", () => {
+  test("returns the first phone on the guardian contact", async () => {
+    const phone = await loadGuardianPhoneNumber(async () => ({
+      ok: true,
+      contacts: [
+        {
+          displayName: "Ada",
+          role: "guardian",
+          channels: [
+            { type: "email", address: "user@example.com", status: "active" },
+            { type: "phone", address: "+15551234567", status: "active" },
+          ],
+        },
+      ],
+    }));
+    expect(phone).toBe("+15551234567");
+  });
+
+  test("returns nothing when the guardian has no phone channel", async () => {
+    const phone = await loadGuardianPhoneNumber(async () => ({
+      ok: true,
+      contacts: [
+        {
+          displayName: "Ada",
+          role: "guardian",
+          channels: [
+            { type: "email", address: "user@example.com", status: "active" },
+          ],
+        },
+      ],
+    }));
+    expect(phone).toBeUndefined();
   });
 });

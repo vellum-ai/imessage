@@ -21,6 +21,26 @@ time, or they clicked Deny. Run `--start` again and have them approve while
 stale secret against a current id fails the same way a wrong id does. Re-copy
 both from the dashboard rather than guessing which one drifted.
 
+**Inbound arrives but the assistant never answers, or replies that the
+sender is not approved** — the webhook verified, then the gateway denied
+the sender. The plugin channel defaults to `guardian_only`. A number that
+is not on the guardian contact is `unknown` and is dropped. A number that
+only appeared in conversation history is not on the contact graph.
+
+Check, then prompt if missing:
+
+```bash
+bun skills/imessage-setup/scripts/guardian-phone.ts
+assistant contacts prompt \
+  --channel phone \
+  --role guardian \
+  --label "Your phone number" \
+  --placeholder "+15551234567"
+```
+
+Do not ask them to paste the number in chat. If this conversation already
+has it, pass `--default-value` in E.164.
+
 **Photon: "Target not allowed for this project"** — a Photon project may only
 message people it knows, and the recipient is not one of them yet. This is a
 project recipient-policy restriction, not a plugin or credential problem. No

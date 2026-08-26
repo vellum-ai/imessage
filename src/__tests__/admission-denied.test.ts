@@ -2,22 +2,15 @@
  * The gateway's floor-deny notice: send the canned line, never run a turn.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
-const turns: unknown[] = [];
-mock.module("@vellumai/plugin-api", () => ({
-  runConversationTurn: (options: unknown) => {
-    turns.push(options);
-    return Promise.resolve({
-      conversationId: "conv-1",
-      content: [{ type: "text", text: "should not run" }],
-    });
-  },
-}));
+import { beforeEach, describe, expect, test } from "bun:test";
 
-const { handleAdmissionDeniedNotice, ACCESS_DENIED_NOT_APPROVED_REPLY } =
-  await import("../admission-denied.ts");
-const { IMessageConfigSchema } = await import("../config.ts");
+import {
+  ACCESS_DENIED_NOT_APPROVED_REPLY,
+  handleAdmissionDeniedNotice,
+} from "../admission-denied.ts";
+import { IMessageConfigSchema } from "../config.ts";
 
 const sends: { target: unknown; body: string; key: string }[] = [];
 const provider = {
@@ -58,7 +51,6 @@ async function bodyOf(response: Response): Promise<Record<string, unknown>> {
 }
 
 beforeEach(() => {
-  turns.length = 0;
   sends.length = 0;
 });
 
@@ -66,6 +58,11 @@ describe("handleAdmissionDeniedNotice", () => {
   const config = IMessageConfigSchema.parse({
     provider: "linq",
     ingressMode: "webhook",
+  });
+
+  test("the notice module does not import a conversation turn", () => {
+    const src = readFileSync(new URL("../admission-denied.ts", import.meta.url), "utf8");
+    expect(src).not.toContain("runConversationTurn");
   });
 
   test("sends the canned denial and does not run a turn", async () => {
@@ -76,7 +73,6 @@ describe("handleAdmissionDeniedNotice", () => {
 
     expect(response.status).toBe(200);
     expect(await bodyOf(response)).toEqual({ ok: true });
-    expect(turns).toEqual([]);
     expect(sends).toEqual([
       {
         target: { to: "+15550100" },
@@ -109,7 +105,6 @@ describe("handleAdmissionDeniedNotice", () => {
       ignored: "provider is not configured",
     });
     expect(sends).toEqual([]);
-    expect(turns).toEqual([]);
   });
 
   test("rejects an unparsable body", async () => {
@@ -146,6 +141,5 @@ describe("handleAdmissionDeniedNotice", () => {
     expect(await bodyOf(response)).toMatchObject({
       error: "could not send the admission denial",
     });
-    expect(turns).toEqual([]);
   });
 });

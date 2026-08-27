@@ -20,6 +20,7 @@ import { runConversationTurn } from "@vellumai/plugin-api";
 import { CHANNEL_ID } from "./plugin-paths.ts";
 import type { PluginInboundEvent } from "./channel/contract.ts";
 import { chunkForDelivery } from "./channel/render.ts";
+import { targetFor } from "./channel/transport.ts";
 import type { MessagingProvider, SendTarget } from "./providers/types.ts";
 
 /**
@@ -85,7 +86,9 @@ function replyTextFrom(blocks: { type: string; text?: string }[]): string {
 }
 
 function sendTarget(event: PluginInboundEvent): SendTarget {
-  return { to: event.message.conversationExternalId };
+  // A Linq or Comms chat id is not a recipient handle. `{ to }` is for
+  // phone numbers and Apple IDs. Everything else is a conversation.
+  return targetFor(event.message.conversationExternalId);
 }
 
 /**

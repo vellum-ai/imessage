@@ -36,14 +36,14 @@ const provider = {
   },
 } as never;
 
-function delivery() {
+function delivery(conversationExternalId = "+12025550142") {
   return {
     version: "v1" as const,
     sourceChannel: "imessage",
     receivedAt: new Date().toISOString(),
     message: {
       content: "hello",
-      conversationExternalId: "+12025550142",
+      conversationExternalId,
       externalMessageId: "msg-1",
     },
     actor: { actorExternalId: "+12025550142", displayName: "Ada" },
@@ -89,6 +89,24 @@ describe("runTurnForDelivery", () => {
     expect(sends).toEqual([
       {
         target: { to: "+12025550142" },
+        body: "hi back",
+        key: "reply:msg-1",
+      },
+    ]);
+  });
+
+  test("addresses a vendor chat id as a conversation, not a recipient", async () => {
+    // Linq webhooks bind the turn to the chat id. Posting that id as `to`
+    // hits the cold-send endpoint and the reply never leaves the conversation.
+    const result = await runTurnForDelivery({
+      event: delivery("chat_abc"),
+      provider,
+    });
+
+    expect(result.replied).toBe(true);
+    expect(sends).toEqual([
+      {
+        target: { conversationId: "chat_abc" },
         body: "hi back",
         key: "reply:msg-1",
       },

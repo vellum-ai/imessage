@@ -87,13 +87,17 @@ export function createTransport(
  * Route by the shape of the conversation id.
  *
  * The normalizer uses the normalized handle as the conversation address when
- * the provider did not supply a conversation id, so an E.164-looking value
- * addresses `to` and anything else addresses `conversationId`.
+ * the provider did not supply a conversation id. A phone or Apple ID is a
+ * recipient (`to`). A vendor chat id is a conversation (`conversationId`).
  */
 export function targetFor(conversationExternalId: string): SendTarget {
-  return /^\+\d{7,15}$/.test(conversationExternalId)
-    ? { to: conversationExternalId }
-    : { conversationId: conversationExternalId };
+  if (
+    /^\+\d{7,15}$/.test(conversationExternalId) ||
+    conversationExternalId.includes("@")
+  ) {
+    return { to: conversationExternalId };
+  }
+  return { conversationId: conversationExternalId };
 }
 
 export { chunkForDelivery, flattenForPlainText, idempotencyKey } from "./render.ts";

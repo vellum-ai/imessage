@@ -58,8 +58,13 @@ describe("targetFor", () => {
     expect(targetFor("+15551234567")).toEqual({ to: "+15551234567" });
   });
 
+  test("addresses an Apple ID as a recipient", () => {
+    expect(targetFor("user@example.com")).toEqual({ to: "user@example.com" });
+  });
+
   test("addresses anything else as a conversation", () => {
     expect(targetFor("conv_abc")).toEqual({ conversationId: "conv_abc" });
+    expect(targetFor("chat_abc")).toEqual({ conversationId: "chat_abc" });
   });
 });
 

@@ -190,7 +190,7 @@ describe("switchChannelProvider", () => {
     });
   });
 
-  test("refuses to switch onto Comms while it is coming soon", async () => {
+  test("allows a switch onto Comms", async () => {
     const configPath = join(dir, "config.json");
     writeFileSync(
       configPath,
@@ -200,16 +200,13 @@ describe("switchChannelProvider", () => {
 
     const switched = await switchChannelProvider(configPath, {
       provider: "comms",
-      ingressMode: "webhook",
+      ingressMode: "poll",
     });
 
-    expect(switched.ok).toBe(false);
-    if (!switched.ok) {
-      expect(switched.error).toBe("Coming soon");
-    }
+    expect(switched.ok).toBe(true);
     expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
-      provider: "photon",
-      ingressMode: "live",
+      provider: "comms",
+      ingressMode: "poll",
     });
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: imessage-setup
-description: Set up the iMessage channel with the user's own Photon account so the assistant can send and receive texts. After the provider is stored, save and verify the user's iMessage handle on their guardian contact if it is missing. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle. Comms by Osis is coming soon; do not set it up.
+description: Set up the iMessage channel with the user's own Photon, Linq, or Comms account so the assistant can send and receive texts. After the provider is stored, save and verify the user's iMessage handle on their guardian contact if it is missing. Use when the user wants to text the assistant, when a send fails with a missing credential or 401, or when the channel reports it is idle.
 metadata:
   emoji: "💬"
   vellum:
@@ -9,17 +9,16 @@ metadata:
 ---
 
 Connects the iMessage channel to the user's own [Photon](https://photon.codes)
-line by default. [Linq](https://dashboard.linqapp.com/sandbox) is also
-selectable from the settings app for a prototype. Comms by Osis is
-implemented but not offered yet. Do not collect a Comms API key, do not set
-`provider` to `comms`, and do not walk them through the Comms dashboard.
+line by default. [Linq](https://dashboard.linqapp.com/sandbox) and
+[Comms by Osis](https://comms.osis.co) are also selectable from the settings
+app.
 
 ## Set expectations first
 
 Say this before starting, because it is usually not what people picture:
 
-- The user creates their **own** account with Photon or Linq, and their
-  own line. There is no number provided for them.
+- The user creates their **own** account with Photon, Linq, or Comms, and
+  their own line. There is no number provided for them.
 - People reach the assistant by texting **that line**, not the user's own
   number.
 - The assistant does **not** read the user's personal iMessage account or
@@ -35,12 +34,15 @@ honest shape for now. Do not promise a provided line is coming.
 
 ## Pick a provider
 
-Photon is the default and the path this skill walks. Linq is also
-selectable in the settings app: they paste a V3 API token from
-https://dashboard.linqapp.com/sandbox and switch the provider to Linq.
-The settings app still lists Comms by Osis, disabled, with a "Coming soon"
-tooltip. If they ask for Comms, say it is coming soon and continue with
-Photon or Linq.
+Photon is the default and the path this skill walks. Linq and Comms are
+also selectable in the settings app.
+
+- Linq: they paste a V3 API token from https://dashboard.linqapp.com/sandbox
+  and switch the provider to Linq.
+- Comms: they paste a Messages API key from https://comms.osis.co with
+  `comms_send` and `comms_read`. Webhook inbound also needs `comms_webhooks`.
+  Scopes are fixed at key creation, so a key missing one has to be replaced.
+  Then switch the provider to Comms.
 
 ## 1. Create the line and get credentials
 
@@ -187,30 +189,30 @@ allowed — go back to step 4 rather than rotating credentials.
 
 ## 6. Inbound
 
-**Use polling.** It is the ingress that works end to end today:
+**Use webhook** when the provider can reach this assistant. The plugin
+registers the endpoint on every webhook-mode start at
+`/webhooks/plugins/imessage/events-<provider>`. The public base comes from
+the host (a managed platform callback route, or a configured public
+ingress), so there is nothing to compose or configure here. On Photon,
+that same start also allows the assistant's contact phone numbers
+(step 4); a number added as a contact later still needs `allow.ts`.
+
+Photon defaults to live gRPC (`ingressMode: "live"`) that reads inbound
+off the same message-plane connection send already uses. It needs no public
+URL and no webhook secret. Webhook mode is still available when the
+provider can reach this assistant. Linq and Comms have no live stream and
+read as webhook. Linq pins `?version=2026-02-03` on its registration URL
+so the payload stays `data.sender_handle` / `data.chat.id`.
+
+Polling is the fallback when the provider cannot reach this assistant:
 
 ```json
 { "ingressMode": "poll", "pollIntervalMs": 5000 }
 ```
 
-Polling needs `comms_read` on Comms, runs in its own worker process, and starts
-from the moment it is enabled rather than replaying the line's history. It
-costs latency and burns requests while the line is quiet.
-
-Webhooks are preferable and the plugin registers them on every webhook-mode
-start, pointing the provider at its own route,
-`/webhooks/plugins/imessage/events-<provider>`. The public base comes from the
-host — a managed platform callback route, or a configured public ingress — so
-there is nothing to compose or configure here. On Photon, that same start also
-allows the assistant's contact phone numbers (step 4); a number added as a
-contact later still needs `allow.ts`.
-
-Photon defaults to live gRPC (`ingressMode: "live"`) that reads inbound
-off the same message-plane connection send already uses. It needs no public
-URL and no webhook secret. Webhook mode is still available when the provider
-can reach this assistant. Linq and Comms have no live stream and read as
-webhook. Linq pins `?version=2026-02-03` on its registration URL so the
-payload stays `data.sender_handle` / `data.chat.id`.
+Polling needs `comms_read` on Comms, runs in its own worker process, and
+starts from the moment it is enabled rather than replaying the line's
+history. It costs latency and burns requests while the line is quiet.
 
 ## Configuration
 
@@ -225,7 +227,7 @@ Optional, in the plugin's `config.json`:
 ## Troubleshooting
 
 Read [`references/troubleshooting.md`](references/troubleshooting.md) when a
-step fails. It covers each symptom the two providers produce — missing
+step fails. It covers each symptom the providers produce: missing
 credentials, Photon's `Target not allowed for this project`, Comms scope
 errors, and sends that succeed while nothing arrives. The Photon allow script
 is in this skill: `scripts/allow.ts`.

@@ -39,12 +39,10 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
  * tooltip. The provider route refuses a switch onto one. An install that
  * already names one keeps running.
  */
-export const UNAVAILABLE_PROVIDERS = {
-  comms: "Coming soon",
-} as const satisfies Partial<Record<ProviderId, string>>;
+export const UNAVAILABLE_PROVIDERS: Partial<Record<ProviderId, string>> = {};
 
 export function unavailableProviderReason(id: string): string | undefined {
-  return UNAVAILABLE_PROVIDERS[id as keyof typeof UNAVAILABLE_PROVIDERS];
+  return UNAVAILABLE_PROVIDERS[id as ProviderId];
 }
 
 export function unavailableProviderList(): { id: string; reason: string }[] {

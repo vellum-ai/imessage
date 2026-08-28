@@ -41,7 +41,9 @@ type MessageListPage = Awaited<
   ReturnType<ReturnType<MessageClientFactory>["listRecent"]>
 >;
 const { sameWebhookUrl } = await import("../webhook-endpoint.ts");
-const { PROVIDER_IDS } = await import("../providers/types.ts");
+const { PROVIDER_IDS, unavailableProviderList } = await import(
+  "../providers/types.ts"
+);
 const { resolveProvider } = await import("../providers/index.ts");
 const { IMessageConfigSchema } = await import("../config.ts");
 
@@ -104,6 +106,10 @@ describe("provider registry", () => {
     expect(PROVIDER_IDS).toContain("comms");
     expect(PROVIDER_IDS).toContain("photon");
     expect(PROVIDER_IDS).toContain("linq");
+  });
+
+  test("offers every registered provider for selection", () => {
+    expect(unavailableProviderList()).toEqual([]);
   });
 
   test("builds photon from config alone", () => {

@@ -72,7 +72,7 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       "Your own Comms workspace and line. One API key covers sending and receiving.",
     credentialsGuide: {
       description:
-        "Sign in to Comms by Osis, provision a line, and mint a Messages API key with the comms_send and comms_read scopes. Scopes are fixed at creation — a key missing one has to be replaced.",
+        "Sign in to Comms by Osis, provision a line, and mint a Messages API key with the comms_send, comms_read, and comms_webhooks scopes. Scopes are fixed at creation, so a key missing one has to be replaced.",
       url: "https://comms.osis.co",
       linkLabel: "Open Comms by Osis",
     },

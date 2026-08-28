@@ -49,13 +49,9 @@ describe("handleSettingsGet", () => {
     expect(payload.ingressModes).toEqual([...INGRESS_MODES]);
   });
 
-  test("marks Comms as coming soon so the panel can disable it", async () => {
-    // Comms is implemented but not selectable. The panel still lists it,
-    // disabled, and uses this reason as the option title.
+  test("offers every implemented provider as selectable", async () => {
     const payload = await settingsPayload();
-    expect(payload.unavailableProviders).toEqual([
-      { id: "comms", reason: "Coming soon" },
-    ]);
+    expect(payload.unavailableProviders).toEqual([]);
   });
 
   test("reports credential state without ever returning a value", async () => {

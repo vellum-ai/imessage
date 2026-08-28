@@ -15,14 +15,14 @@ threads.
 
 ## Bring your own line
 
-You supply the line. Photon is the default. Linq is selectable for a
-prototype:
+You supply the line. Photon is the default. Linq and Comms are also
+selectable:
 
 | Provider | You need | Where |
 | --- | --- | --- |
 | **Photon** (default) | A project ID and project secret | [photon.codes](https://photon.codes) |
 | **Linq** | A V3 API token | [dashboard.linqapp.com/sandbox](https://dashboard.linqapp.com/sandbox) |
-| **Comms by Osis** | Coming soon | [comms.osis.co](https://comms.osis.co) |
+| **Comms by Osis** | A Messages API key | [comms.osis.co](https://comms.osis.co) |
 
 For Photon, the `imessage-setup` skill can connect the project through
 Photon's device login (approve a short code in the browser) and store the

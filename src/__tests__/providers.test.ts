@@ -655,8 +655,9 @@ describe("photon provider", () => {
   });
 
   test("typing with a guid in `to` still reaches the plane", async () => {
-    // Live turns address the chat as `{ to: conversationExternalId }`, and
-    // Photon live events carry a chat guid there.
+    // Photon accepts a chat guid in either `to` or `conversationId`. A
+    // caller that still addresses the chat as `{ to: guid }` must not drop
+    // the dots.
     const plane = fakePlane();
     stubPhoton(() => undefined);
 

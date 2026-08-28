@@ -82,6 +82,22 @@ describe("handleAdmissionDeniedNotice", () => {
     ]);
   });
 
+  test("addresses a vendor chat id as a conversation", async () => {
+    const response = await handleAdmissionDeniedNotice(
+      post(notice({ conversationExternalId: "chat_abc" })),
+      { config, provider },
+    );
+
+    expect(response.status).toBe(200);
+    expect(sends).toEqual([
+      {
+        target: { conversationId: "chat_abc" },
+        body: ACCESS_DENIED_NOT_APPROVED_REPLY,
+        key: "deny:msg-1",
+      },
+    ]);
+  });
+
   test("uses the local copy when the notice omits replyText", async () => {
     await handleAdmissionDeniedNotice(post(notice({ replyText: undefined })), {
       config,

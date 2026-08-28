@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 
+import { targetFor } from "./channel/transport.ts";
 import type { IMessageConfig } from "./config.ts";
 import { describeError } from "./providers/error-detail.ts";
 import { resolveProvider } from "./providers/index.ts";
@@ -83,7 +84,7 @@ export async function handleAdmissionDeniedNotice(
 
   try {
     await provider.send(
-      { to: notice.data.conversationExternalId },
+      targetFor(notice.data.conversationExternalId),
       replyText,
       { idempotencyKey: `deny:${notice.data.externalMessageId}` },
     );

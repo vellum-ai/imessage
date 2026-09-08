@@ -445,14 +445,14 @@ describe("photon provider", () => {
     }
   });
 
-  test("an empty credential names the settings app", async () => {
+  test("an empty credential says the field is not set", async () => {
     credentialValue = "";
     const readiness = await createPhotonProvider().checkReadiness();
 
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
       expect(readiness.reason).toContain("is not set");
-      expect(readiness.reason).toContain("settings app");
+      expect(readiness.reason).not.toContain("settings app");
     }
   });
 

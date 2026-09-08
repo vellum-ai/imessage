@@ -5,21 +5,23 @@ working down the list — these are unrelated failures, not steps.
 
 **"The Photon project ID is not set"** (or the Comms equivalent) — device
 login (`connect.ts --finish`) did not complete, or the Comms key was never
-stored. Check with `assistant credentials list`, or open the settings app,
-which shows which fields are stored.
+stored. Check with `assistant credentials list`. Collect the missing field
+with `assistant credentials prompt`. Do not restart the assistant. Do not
+send the user to a settings panel.
 
 **Photon device login: "invalid_client"** — hosted Photon only accepts
 registered device clients. The script uses Photon's published CLI client id
-(`photon-cli`). Retry `--start`. If it still fails, use the manual
-project-id / project-secret fallback in the settings app.
+(`photon-cli`). Retry `--start`. If it still fails, prompt for the project
+ID and project secret (the manual fallback in SKILL.md).
 
 **Photon device login timed out or access_denied** — they did not approve in
-time, or they clicked Deny. Run `--start` again and have them approve while
-`--finish` is waiting.
+time, or they clicked Deny. Run `--start` again, show the new URL in chat,
+then run `--finish` on the next turn so they can approve while it waits.
 
 **Photon: "invalid credentials"** — the project ID and secret are a pair; a
-stale secret against a current id fails the same way a wrong id does. Re-copy
-both from the dashboard rather than guessing which one drifted.
+stale secret against a current id fails the same way a wrong id does. Prompt
+for both fields again rather than guessing which one drifted. Do not restart
+the assistant.
 
 **Inbound arrives but the assistant never answers, or replies that the
 sender is not approved** — the webhook verified, then the gateway denied
@@ -122,8 +124,8 @@ the route's descriptor yet; a 200 with `probe: "comms.ping"` in the plugin's
 reply means the whole path works and a ping is simply not a turn.
 
 **The provider shows zero webhooks and nothing says why** — the plugin records
-its last registration attempt in the settings app, and the line names the step
-it stopped at (`read-secret`, `resolve-url`, `call-provider`, `store-secret`).
+its last registration attempt, and the line names the step it stopped at
+(`read-secret`, `resolve-url`, `call-provider`, `store-secret`).
 Four unrelated things fail here and the remedies have nothing in common, so
 read the step before changing anything:
 

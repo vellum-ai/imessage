@@ -10,8 +10,26 @@ metadata:
 
 Connects the iMessage channel to the user's own [Photon](https://photon.codes)
 line by default. [Linq](https://dashboard.linqapp.com/sandbox) and
-[Comms by Osis](https://comms.osis.co) are also selectable from the settings
-app.
+[Comms by Osis](https://comms.osis.co) are also supported when the user asks
+for them.
+
+## Hard rules
+
+- **Send the Photon approval URL once, in chat, in the same turn as `--start`.**
+  Paste it as a markdown link. That URL already signs them in. Do not also
+  send `https://photon.codes` or `https://app.photon.codes`. Do not run
+  `--finish` in the same turn as `--start`. `--finish` blocks until they
+  approve, so running it before they have the link means they never see it.
+- **Collect a missing project ID and project secret with
+  `assistant credentials prompt`.** Never ask for them in chat. Never pass
+  them to `assistant credentials set`. The CLI refuses inline user-supplied
+  values from an agent shell.
+- **Do not restart the assistant.** Do not tell the user to restart it.
+  Storing credentials takes effect on the next send. Channel ingress comes
+  up on its own after a successful store. Restarting is never part of setup.
+- **Keep the settings panel in the background.** Do not mention it, do not
+  open it, and do not send the user there to fill fields. Conversational
+  setup (device login, or credential prompts) is the path.
 
 ## Set expectations first
 
@@ -34,15 +52,14 @@ honest shape for now. Do not promise a provided line is coming.
 
 ## Pick a provider
 
-Photon is the default and the path this skill walks. Linq and Comms are
-also selectable in the settings app.
+Photon is the default and the path this skill walks.
 
-- Linq: they paste a V3 API token from https://dashboard.linqapp.com/sandbox
-  and switch the provider to Linq.
-- Comms: they paste a Messages API key from https://comms.osis.co with
-  `comms_send` and `comms_read`. Webhook inbound also needs `comms_webhooks`.
+- Linq: collect a V3 API token from https://dashboard.linqapp.com/sandbox
+  with `assistant credentials prompt --service imessage --field linq_api_key`.
+- Comms: collect a Messages API key from https://comms.osis.co with
+  `comms_send` and `comms_read` (`comms_webhooks` too if inbound is webhook).
   Scopes are fixed at key creation, so a key missing one has to be replaced.
-  Then switch the provider to Comms.
+  Collect it with `assistant credentials prompt --service imessage --field api_key`.
 
 ## 1. Create the line and get credentials
 
@@ -54,9 +71,21 @@ and this plugin stores the id and secret itself.
 bun skills/imessage-setup/scripts/connect.ts --start
 ```
 
-Show the user the printed URL and the short code. They sign in at
-https://app.photon.codes if needed, confirm the code matches, and click
-Approve. Then:
+`--start` prints one approval URL and a short code, then exits. In **this
+same turn**, before any other command:
+
+1. Reply with that URL as a markdown link, for example
+   `[Approve Photon](https://app.photon.codes/sign-in/device/approve?user_code=...)`.
+2. Include the short code so they can confirm it matches.
+3. Tell them to click Approve.
+4. Stop. Do not run `--finish` yet.
+
+The printed URL is the only Photon link to send. It already takes them
+through sign-in. Sending `https://photon.codes` or
+`https://app.photon.codes` as well is a second, useless trip.
+
+On the **next** turn, after they have the link (they said they approved, or
+they came back), run:
 
 ```bash
 bun skills/imessage-setup/scripts/connect.ts --finish
@@ -68,27 +97,52 @@ If they already have a "Vellum Assistant" project, it reuses it and rotates
 that project's secret. Pass `--force` on both commands only when they asked
 to reconnect.
 
-If device login is unavailable, the manual fallback is still valid: they
-create a project at https://photon.codes and paste the project ID and
-project secret into the settings app, or:
+If device login is unavailable (`invalid_client`, timeout, `access_denied`),
+use the manual fallback below. Do not invent a restart to recover.
+
+### Manual fallback: prompt for project ID and project secret
+
+They create a project at https://photon.codes if they do not have one yet.
+Then collect the two fields with secure prompts, **in this order**, never
+in chat:
+
+Tell them the first prompt is for the project ID, then:
 
 ```bash
-assistant credentials set --service imessage --field photon_project_id <id>
-assistant credentials set --service imessage --field photon_project_secret <secret>
+assistant credentials prompt \
+  --service imessage \
+  --field photon_project_id \
+  --label "Photon project ID" \
+  --description "Paste the project ID from your Photon project page." \
+  --placeholder "Project ID"
 ```
+
+After that prompt returns 0, tell them the next prompt is for the project
+secret, then:
+
+```bash
+assistant credentials prompt \
+  --service imessage \
+  --field photon_project_secret \
+  --label "Photon project secret" \
+  --description "Paste the project secret from the same Photon project. It is shown once." \
+  --placeholder "Project secret"
+```
+
+Each command blocks until they submit. Tell them what to paste **before**
+running it. Exit code **130** means they cancelled: nothing was stored; ask
+whether they want to try again. Any other non-zero exit is a real failure.
+
+Never put a secret in `config.json`. Never paste one into chat. Never pass a
+user-typed value to `assistant credentials set`.
 
 ## 2. Store the credentials
 
 Photon device login (step 1) already stored the pair. Skip this step unless
-they used the manual fallback.
+they used the manual fallback, which already prompted.
 
-The settings app is the shortest manual path: open the iMessage plugin's
-settings and fill in Photon's fields. It stores them in the credential store
-and restarts the channel.
-
-Never put a secret in `config.json` and never paste one into chat. The plugin
-reads them from the credential store at call time, so rotating one later needs
-no restart.
+The plugin reads credentials from the store at call time, so rotating one
+later needs no restart of the assistant.
 
 ## 3. Save and verify the user's iMessage handle
 
@@ -220,9 +274,9 @@ Optional, in the plugin's `config.json`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `provider` | `"photon"` | `"photon"`, `"linq"`, or `"comms"`. Set it from the settings app, which restarts ingress; editing it here needs a reload. |
-| `ingressMode` | `"live"` | `"live"` (Photon gRPC stream, the default), `"webhook"`, or `"poll"`. Set it from the settings app, which restarts ingress. Linq and Comms have no live stream, so `"live"` is read as `"webhook"`. |
-| `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only, and not surfaced in the settings app. |
+| `provider` | `"photon"` | `"photon"`, `"linq"`, or `"comms"`. Changing it restarts channel ingress, not the assistant. |
+| `ingressMode` | `"live"` | `"live"` (Photon gRPC stream, the default), `"webhook"`, or `"poll"`. Changing it restarts channel ingress. Linq and Comms have no live stream, so `"live"` is read as `"webhook"`. |
+| `pollIntervalMs` | `5000` | Delay between polls, 2000 to 300000. Poll mode only. |
 
 ## Troubleshooting
 

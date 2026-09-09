@@ -10,12 +10,13 @@
  * user approves, then stores the project id and secret. `--force` rotates
  * an already-connected project's secret.
  *
- * Never prints a secret or a device code.
+ * Never prints a secret or a device code. Never tells the assistant to run
+ * `--finish` in the same turn as `--start`.
  */
 
 import {
   finishPhotonConnect,
-  photonApprovalUrl,
+  formatPhotonConnectStart,
   startPhotonConnect,
 } from "../../../src/providers/photon/connect.ts";
 
@@ -39,25 +40,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 function printStart(started: Awaited<ReturnType<typeof startPhotonConnect>>): void {
-  if (started.alreadyConnected) {
-    console.log(
-      "Photon is already connected. Pass --force to reconnect and rotate the project secret.",
-    );
-    return;
-  }
-  const url = photonApprovalUrl(started);
-  if (!url || !started.userCode) {
-    throw new Error("Photon did not return an approval URL and user code.");
-  }
-  console.log("Open this URL to authorize the assistant:");
-  console.log("");
-  console.log(url);
-  console.log("");
-  console.log(`Confirm the code matches: ${started.userCode}`);
-  console.log("");
-  console.log(
-    "After you approve, run: bun skills/imessage-setup/scripts/connect.ts --finish",
-  );
+  console.log(formatPhotonConnectStart(started));
 }
 
 function printFinish(done: Awaited<ReturnType<typeof finishPhotonConnect>>): void {

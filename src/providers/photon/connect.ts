@@ -224,3 +224,24 @@ export async function finishPhotonConnect(
 export function photonApprovalUrl(started: PhotonConnectStart): string | undefined {
   return started.verificationUriComplete ?? started.verificationUri;
 }
+
+/**
+ * What `--start` prints. The URL is the only Photon link the assistant should
+ * send, and `--finish` must wait until the next turn so the user can see it.
+ */
+export function formatPhotonConnectStart(started: PhotonConnectStart): string {
+  if (started.alreadyConnected) {
+    return "Photon is already connected. Pass --force to reconnect and rotate the project secret.";
+  }
+  const url = photonApprovalUrl(started);
+  if (!url || !started.userCode) {
+    throw new Error("Photon did not return an approval URL and user code.");
+  }
+  return [
+    "Show the user this approval URL as a markdown link in this turn. Do not send any other Photon URL. Do not run --finish until the next turn, after they have the link.",
+    "",
+    url,
+    "",
+    `Confirm the code matches: ${started.userCode}`,
+  ].join("\n");
+}

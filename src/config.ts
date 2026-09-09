@@ -222,9 +222,7 @@ export async function resolveCredentialField(
     return value;
   }
 
-  throw new Error(
-    `${label} is not set. Add it in the iMessage settings app.`,
-  );
+  throw new Error(`${label} is not set.`);
 }
 
 /** Read the Comms API key. */

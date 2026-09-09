@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
   finishPhotonConnect,
+  formatPhotonConnectStart,
   photonApprovalUrl,
   startPhotonConnect,
 } from "../providers/photon/connect.ts";
@@ -76,6 +77,32 @@ describe("startPhotonConnect", () => {
     ) as { deviceCode: string; expiresAt: number };
     expect(pending.deviceCode).toBe("dev-1");
     expect(pending.expiresAt).toBe(5_000 + 600_000);
+  });
+});
+
+describe("formatPhotonConnectStart", () => {
+  test("tells the assistant to send only this URL and wait a turn", () => {
+    const message = formatPhotonConnectStart({
+      alreadyConnected: false,
+      userCode: "J68Q-KGDH",
+      verificationUri: "https://app.photon.codes/sign-in/device",
+      verificationUriComplete:
+        "https://app.photon.codes/sign-in/device/approve?user_code=J68QKGDH",
+    });
+
+    expect(message).toContain(
+      "https://app.photon.codes/sign-in/device/approve?user_code=J68QKGDH",
+    );
+    expect(message).toContain("Confirm the code matches: J68Q-KGDH");
+    expect(message).toContain("Do not send any other Photon URL");
+    expect(message).toContain("Do not run --finish until the next turn");
+    expect(message).not.toContain("connect.ts --finish");
+  });
+
+  test("says so when Photon is already connected", () => {
+    expect(formatPhotonConnectStart({ alreadyConnected: true })).toContain(
+      "Photon is already connected",
+    );
   });
 });
 

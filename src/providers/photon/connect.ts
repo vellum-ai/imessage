@@ -6,7 +6,9 @@
  * `data/`, `finishPhotonConnect` polls until the user approves, then finds
  * or creates a project, rotates its secret, and stores the pair the rest of
  * the plugin already reads (`imessage/photon_project_id` and
- * `imessage/photon_project_secret`).
+ * `imessage/photon_project_secret`). A successful poll writes the access
+ * token onto that pending file before the credential-store write, so a later
+ * `--finish` can resume without polling again.
  */
 
 import {
@@ -40,12 +42,14 @@ const PendingSchema = z.object({
   verificationUriComplete: z.string().min(1).optional(),
   expiresAt: z.number().int().positive(),
   interval: z.number().int().positive(),
+  accessToken: z.string().min(1).optional(),
 });
 
 export type PendingPhotonConnect = z.infer<typeof PendingSchema>;
 
 export interface PhotonConnectStart {
   alreadyConnected: boolean;
+  alreadyApproved?: boolean;
   userCode?: string;
   verificationUri?: string;
   verificationUriComplete?: string;
@@ -76,14 +80,23 @@ function pendingPath(storageDir: string): string {
   return join(storageDir, PENDING_FILENAME);
 }
 
+function writePendingFile(
+  storageDir: string,
+  pending: PendingPhotonConnect,
+): void {
+  const path = pendingPath(storageDir);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(pending, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+}
+
 function writePending(
   storageDir: string,
   challenge: DeviceCodeChallenge,
   now: () => number,
 ): void {
-  const path = pendingPath(storageDir);
-  mkdirSync(dirname(path), { recursive: true });
-  const pending: PendingPhotonConnect = {
+  writePendingFile(storageDir, {
     deviceCode: challenge.deviceCode,
     userCode: challenge.userCode,
     verificationUri: challenge.verificationUri,
@@ -92,10 +105,23 @@ function writePending(
       : {}),
     expiresAt: now() + challenge.expiresIn * 1000,
     interval: challenge.interval,
-  };
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(pending, null, 2)}\n`, "utf8");
-  renameSync(tmp, path);
+  });
+}
+
+function tryReadPending(storageDir: string): PendingPhotonConnect | undefined {
+  const path = pendingPath(storageDir);
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  try {
+    const parsed = PendingSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    if (!parsed.success) {
+      return undefined;
+    }
+    return parsed.data;
+  } catch {
+    return undefined;
+  }
 }
 
 function readPending(storageDir: string): PendingPhotonConnect {
@@ -144,7 +170,10 @@ function dashboardOf(opts: PhotonConnectOptions): PhotonDashboardClient {
  * Mint a device code and persist it so `--finish` can poll later.
  *
  * A working stored pair is treated as already connected unless `force` is
- * set. Reconnecting rotates the project secret.
+ * set. Reconnecting rotates the project secret. A non-expired pending login
+ * that already holds an access token is treated as already approved: the
+ * device code is single-use, so minting another one would throw the token
+ * away.
  */
 export async function startPhotonConnect(
   opts: PhotonConnectOptions = {},
@@ -156,6 +185,11 @@ export async function startPhotonConnect(
   }
 
   const now = opts.now ?? Date.now;
+  const pending = tryReadPending(storageDir);
+  if (pending?.accessToken && pending.expiresAt > now()) {
+    return { alreadyConnected: false, alreadyApproved: true };
+  }
+
   const challenge = await dashboardOf(opts).requestDeviceCode();
   writePending(storageDir, challenge, now);
   return {
@@ -171,6 +205,11 @@ export async function startPhotonConnect(
 
 /**
  * Finish a started login: poll, provision a project, store the secret pair.
+ *
+ * A successful poll writes the access token onto the pending login before
+ * project lookup, secret rotation, or the credential-store write, so a later
+ * `--finish` can resume without polling again. A poll failure deletes the
+ * pending file so `--start` can mint a fresh device code.
  */
 export async function finishPhotonConnect(
   opts: PhotonConnectOptions = {},
@@ -184,18 +223,30 @@ export async function finishPhotonConnect(
 
   const pending = readPending(storageDir);
   const now = opts.now ?? Date.now;
-  const remainingSec = Math.max(1, Math.floor((pending.expiresAt - now()) / 1000));
   const dashboard = dashboardOf(opts);
-  const token = await dashboard.pollForToken({
-    deviceCode: pending.deviceCode,
-    userCode: pending.userCode,
-    verificationUri: pending.verificationUri,
-    ...(pending.verificationUriComplete
-      ? { verificationUriComplete: pending.verificationUriComplete }
-      : {}),
-    expiresIn: remainingSec,
-    interval: pending.interval,
-  });
+  let token = pending.accessToken;
+  if (!token) {
+    const remainingSec = Math.max(
+      1,
+      Math.floor((pending.expiresAt - now()) / 1000),
+    );
+    try {
+      token = await dashboard.pollForToken({
+        deviceCode: pending.deviceCode,
+        userCode: pending.userCode,
+        verificationUri: pending.verificationUri,
+        ...(pending.verificationUriComplete
+          ? { verificationUriComplete: pending.verificationUriComplete }
+          : {}),
+        expiresIn: remainingSec,
+        interval: pending.interval,
+      });
+    } catch (err) {
+      clearPending(storageDir);
+      throw err;
+    }
+    writePendingFile(storageDir, { ...pending, accessToken: token });
+  }
   const projectName = opts.projectName ?? DEFAULT_PHOTON_PROJECT_NAME;
   const existing = await dashboard.findProjectByName(token, projectName);
   const project =
@@ -206,7 +257,7 @@ export async function finishPhotonConnect(
     ((values: {
       photon_project_id: string;
       photon_project_secret: string;
-    }) => storeCredentials("photon", values));
+    }) => storeCredentials("photon", values, { generated: true }));
   await store({
     photon_project_id: project.id,
     photon_project_secret: secret,
@@ -232,6 +283,9 @@ export function photonApprovalUrl(started: PhotonConnectStart): string | undefin
 export function formatPhotonConnectStart(started: PhotonConnectStart): string {
   if (started.alreadyConnected) {
     return "Photon is already connected. Pass --force to reconnect and rotate the project secret.";
+  }
+  if (started.alreadyApproved) {
+    return "Photon login is already approved. Run connect.ts --finish to store the project credentials. Do not send a new approval URL.";
   }
   const url = photonApprovalUrl(started);
   if (!url || !started.userCode) {

@@ -18,6 +18,17 @@ ID and project secret (the manual fallback in SKILL.md).
 time, or they clicked Deny. Run `--start` again, show the new URL in chat,
 then run `--finish` on the next turn so they can approve while it waits.
 
+**Photon device login: "invalid_grant".** The device code is single-use. If
+they already approved, retry `connect.ts --finish` so it can reuse the
+stored access token. Do not run `--start` and do not send a new approval
+URL. `--start` reports already-approved when that token is already on file.
+
+**CLI refusing an inline secret from an agent shell.** `--finish` stores
+API-issued `photon_project_id` and `photon_project_secret` and must pass
+`--generated` internally. Retry `--finish`. Do not collect those two fields
+with `assistant credentials prompt`. Do not pass `--generated` to
+`connect.ts`; it is not a connect option.
+
 **Photon: "invalid credentials"** — the project ID and secret are a pair; a
 stale secret against a current id fails the same way a wrong id does. Prompt
 for both fields again rather than guessing which one drifted. Do not restart

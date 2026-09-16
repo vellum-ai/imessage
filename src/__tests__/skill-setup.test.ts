@@ -48,4 +48,12 @@ describe("imessage-setup skill", () => {
     expect(skill).not.toMatch(/open the iMessage plugin's settings/i);
     expect(skill).not.toMatch(/shortest manual path/i);
   });
+
+  test("does not send the first Photon text", () => {
+    expect(skill).toContain("On Photon, do not send the first text");
+    expect(skill).toContain("do not send a setup-check outbound");
+    expect(skill).toContain("tell them to text the line");
+    expect(skill).toMatch(/line `allow\.ts`\s+printed/);
+    expect(skill).not.toMatch(/go back to step 4 rather than rotating credentials/);
+  });
 });

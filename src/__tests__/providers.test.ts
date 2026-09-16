@@ -767,6 +767,31 @@ describe("photon provider", () => {
     });
   });
 
+  test("allowRecipient returns the line they should text first", async () => {
+    stubPhoton((call) => {
+      if (call.path.endsWith("/users/")) {
+        return Response.json({
+          succeed: true,
+          data: {
+            id: "usr_1",
+            phoneNumber: "+15551234567",
+            assignedPhoneNumber: "+15550100",
+          },
+        });
+      }
+      return undefined;
+    });
+
+    const result = await createPhotonProvider(
+      fakePlane().factory,
+    ).allowRecipient?.("+15551234567");
+
+    expect(result).toEqual({
+      phoneNumber: "+15551234567",
+      assignedPhoneNumber: "+15550100",
+    });
+  });
+
   test("allowRecipient pulls the phone out of a chat guid", async () => {
     stubPhoton(() => undefined);
     const result = await createPhotonProvider(fakePlane().factory).allowRecipient?.(

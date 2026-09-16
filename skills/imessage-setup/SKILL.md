@@ -30,6 +30,11 @@ for them.
 - **Keep the settings panel in the background.** Do not mention it, do not
   open it, and do not send the user there to fill fields. Conversational
   setup (device login, or credential prompts) is the path.
+- **On Photon, do not send the first text.** After credentials and `allow.ts`,
+  tell them to text the line from their phone. Photon's message plane
+  refuses the first outbound to a number it has not heard from, even when
+  that number is already a project user. A refused setup-check is expected.
+  Do not retry the send. Do not diagnose credentials. Wait for their inbound.
 
 ## Set expectations first
 
@@ -41,6 +46,9 @@ Say this before starting, because it is usually not what people picture:
   number.
 - The assistant does **not** read the user's personal iMessage account or
   history.
+- On Photon, they text the line first. The assistant cannot originate the
+  first message to a number the shared line has not heard from. That is a
+  Photon rule, not a setup failure.
 
 If the user wanted the assistant to read and answer their existing personal
 iMessage threads, this is the wrong tool. Say so plainly rather than proceeding.
@@ -225,21 +233,33 @@ bun skills/imessage-setup/scripts/allow.ts --to "+15551234567"
 ```
 
 `--to` accepts E.164 (`+15551234567`) or a US national number; anything else
-is rejected rather than guessed at. Linq and Comms have no such restriction.
-Skip this step there.
+is rejected rather than guessed at. The script prints the Photon line they
+should text first when the project returned one. Relay that number. Linq and
+Comms have no such restriction. Skip this step there.
 
-## 5. Confirm sending works
+## 5. Confirm the loop works
+
+**Photon:** do not send a setup-check outbound. Photon's message plane will
+not let the line place the first call to a number it has not heard from,
+even after a successful `allow.ts`. That is expected on a shared line: the
+project does not associate their phone with this assistant until they text
+in.
+
+Tell them to send a short text (for example "hi") to the line `allow.ts`
+printed. Then wait. Inbound from their verified handle is the proof. Do not
+retry `send.ts`. Do not treat the refused outbound as a credential failure
+or as a missed `allow.ts`.
+
+**Linq and Comms** can send first. There, a setup-check outbound is fine:
 
 ```bash
 bun skills/imessage/scripts/send.ts --to "<the user's own number>" --body "Setup check from your assistant."
 ```
 
 If step 3 found or saved a number, use that as `--to`. Have the user confirm
-it arrived. The script sends through the same provider
-adapter the channel uses, over whichever line `config.json` names, so this
-isolates a credential problem from an ingress problem on either provider. If
-Photon still answers `Target not allowed for this project`, the number was not
-allowed — go back to step 4 rather than rotating credentials.
+it arrived. The script sends through the same provider adapter the channel
+uses, over whichever line `config.json` names, so this isolates a credential
+problem from an ingress problem.
 
 ## 6. Inbound
 
@@ -282,6 +302,6 @@ Optional, in the plugin's `config.json`:
 
 Read [`references/troubleshooting.md`](references/troubleshooting.md) when a
 step fails. It covers each symptom the providers produce: missing
-credentials, Photon's `Target not allowed for this project`, Comms scope
-errors, and sends that succeed while nothing arrives. The Photon allow script
-is in this skill: `scripts/allow.ts`.
+credentials, Photon's first-text rule on a shared line, Photon's `Target not
+allowed for this project`, Comms scope errors, and sends that succeed while
+nothing arrives. The Photon allow script is in this skill: `scripts/allow.ts`.

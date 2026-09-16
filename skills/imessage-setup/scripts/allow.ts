@@ -8,6 +8,8 @@
  * Photon will only message people the project knows. Anyone else is refused
  * at the message plane with "Target not allowed for this project". This
  * registers the number as a project user so a later send can go through.
+ * On a shared line that is not enough for the first outbound: `--to` prints
+ * the line they should text first when Photon returned one.
  *
  * `--contacts` allows every phone number already on the assistant's
  * contacts — the same set webhook registration allows when the channel
@@ -18,7 +20,11 @@
  * rather than assuming the number is now messageable.
  */
 
-import { allowContactPhones, allowRecipient } from "./allow-client.ts";
+import {
+  allowContactPhones,
+  allowRecipient,
+  formatAllowRecipient,
+} from "./allow-client.ts";
 
 interface Args {
   to?: string;
@@ -63,7 +69,7 @@ async function main(): Promise<void> {
 
   if (args.to) {
     const allowed = await allowRecipient(args.to);
-    console.log(`Allowed ${allowed.phoneNumber} on this Photon project.`);
+    console.log(formatAllowRecipient(allowed));
     return;
   }
 
@@ -76,8 +82,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  for (const phone of result.allowed) {
-    console.log(`Allowed ${phone} on this Photon project.`);
+  for (const entry of result.allowed) {
+    console.log(formatAllowRecipient(entry));
   }
   if (result.failed.length > 0) {
     const detail = result.failed

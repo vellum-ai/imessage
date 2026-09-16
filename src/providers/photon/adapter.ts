@@ -116,7 +116,10 @@ export function createPhotonProvider(
    * call. Chat guids are reduced to the phone they carry: Photon's user API
    * wants E.164, and posting the guid is a 422 that reads like a bad address.
    */
-  async function allowHandle(handle: string): Promise<string> {
+  async function allowHandle(handle: string): Promise<{
+    phoneNumber: string;
+    assignedPhoneNumber?: string;
+  }> {
     const phone = phoneFromAddress(handle);
     if (!phone) {
       throw new Error(
@@ -124,8 +127,13 @@ export function createPhotonProvider(
           "Use E.164, e.g. +15551234567.",
       );
     }
-    await client.ensureUser(phone);
-    return phone;
+    const user = await client.ensureUser(phone);
+    return {
+      phoneNumber: phone,
+      ...(user?.assignedPhoneNumber
+        ? { assignedPhoneNumber: user.assignedPhoneNumber }
+        : {}),
+    };
   }
 
   return {
@@ -355,8 +363,11 @@ export function createPhotonProvider(
       return classifyPhotonWebhook(raw, receivedAt);
     },
 
-    async allowRecipient(handle: string): Promise<{ phoneNumber: string }> {
-      return { phoneNumber: await allowHandle(handle) };
+    async allowRecipient(handle: string): Promise<{
+      phoneNumber: string;
+      assignedPhoneNumber?: string;
+    }> {
+      return allowHandle(handle);
     },
 
     async close(): Promise<void> {

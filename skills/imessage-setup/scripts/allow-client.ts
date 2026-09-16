@@ -2,9 +2,13 @@
  * Allow a Photon recipient without sending a message.
  *
  * Photon will only message people the project knows. A cold send registers
- * the recipient on the way out, but a setup check — and any later outbound
- * to a number that has never texted the line — still fails with "Target not
+ * the recipient on the way out, but a setup check, and any later outbound
+ * to a number that has never texted the line, still fails with "Target not
  * allowed for this project" until they are a project user.
+ *
+ * Registering them is not enough for the first outbound on a shared line.
+ * The message plane still refuses until that number has texted in.
+ * `assignedPhoneNumber` is the line they should text, when Photon returned one.
  *
  * This is the setup skill's half of that: one number by hand, or every
  * phone number already on the assistant's contacts. The plugin also allows
@@ -22,10 +26,11 @@ import type { MessagingProvider } from "../../../src/providers/types.ts";
 
 export interface AllowResult {
   phoneNumber: string;
+  assignedPhoneNumber?: string;
 }
 
 export interface AllowManyResult {
-  allowed: string[];
+  allowed: AllowResult[];
   failed: { phone: string; reason: string }[];
 }
 
@@ -79,6 +84,19 @@ export async function allowRecipient(
 }
 
 /**
+ * What `--to` prints. The second line is the number they should text first.
+ */
+export function formatAllowRecipient(result: AllowResult): string {
+  const lines = [`Allowed ${result.phoneNumber} on this Photon project.`];
+  if (result.assignedPhoneNumber) {
+    lines.push(
+      `Ask them to text ${result.assignedPhoneNumber} from that number before any outbound. Photon's message plane refuses the first send to a number it has not heard from.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
  * Allow every contact phone number the assistant already knows.
  *
  * Continues after a single failure so one full Photon project does not
@@ -95,13 +113,13 @@ export async function allowContactPhones(
   }
 
   const phones = await loadContactPhoneNumbers(deps.listContacts);
-  const allowed: string[] = [];
+  const allowed: AllowResult[] = [];
   const failed: { phone: string; reason: string }[] = [];
 
   for (const phone of phones) {
     try {
       const result = await provider.allowRecipient(phone);
-      allowed.push(result.phoneNumber);
+      allowed.push(result);
     } catch (err) {
       failed.push({
         phone,

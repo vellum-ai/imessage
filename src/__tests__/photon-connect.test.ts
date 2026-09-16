@@ -6,7 +6,7 @@
  * or writes a real secret.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -103,6 +103,17 @@ describe("formatPhotonConnectStart", () => {
     expect(formatPhotonConnectStart({ alreadyConnected: true })).toContain(
       "Photon is already connected",
     );
+  });
+
+  test("tells the assistant to finish an already-approved login without a new URL", () => {
+    const message = formatPhotonConnectStart({
+      alreadyConnected: false,
+      alreadyApproved: true,
+    });
+
+    expect(message).toContain("Run connect.ts --finish");
+    expect(message).toContain("Do not send a new approval URL");
+    expect(message).not.toContain("app.photon.codes");
   });
 });
 
@@ -218,5 +229,144 @@ describe("finishPhotonConnect", () => {
         isConnected: async () => false,
       }),
     ).rejects.toThrow(/No Photon login is in progress/);
+  });
+
+  test("clears the pending login when the poll fails", async () => {
+    await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      fetch: async () =>
+        jsonResponse(200, {
+          device_code: "dev-1",
+          user_code: "ABCD-1234",
+          verification_uri: "https://app.photon.codes/sign-in/device",
+          expires_in: 600,
+          interval: 5,
+        }),
+    });
+
+    await expect(
+      finishPhotonConnect({
+        storageDir: dir,
+        isConnected: async () => false,
+        sleep: async () => {},
+        fetch: async (input) => {
+          if (String(input).endsWith("/api/auth/device/token")) {
+            return jsonResponse(400, { error: "invalid_grant" });
+          }
+          return jsonResponse(404, { error: "unexpected" });
+        },
+      }),
+    ).rejects.toThrow(/invalid_grant|Photon device-token poll/);
+
+    expect(existsSync(join(dir, "photon-device-login.json"))).toBe(false);
+  });
+
+  test("reuses a stored access token when store fails after a successful poll", async () => {
+    await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      now: () => 5_000,
+      fetch: async () =>
+        jsonResponse(200, {
+          device_code: "dev-1",
+          user_code: "ABCD-1234",
+          verification_uri: "https://app.photon.codes/sign-in/device",
+          expires_in: 600,
+          interval: 5,
+        }),
+    });
+
+    const stored: Record<string, string>[] = [];
+    let polls = 0;
+    let deviceCodes = 0;
+    let storeAttempts = 0;
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/api/auth/device/code")) {
+        deviceCodes += 1;
+        return jsonResponse(200, {
+          device_code: "dev-2",
+          user_code: "WXYZ-9999",
+          verification_uri: "https://app.photon.codes/sign-in/device",
+          expires_in: 600,
+          interval: 5,
+        });
+      }
+      if (url.endsWith("/api/auth/device/token")) {
+        polls += 1;
+        return jsonResponse(200, { access_token: "tok-1" });
+      }
+      if (url.endsWith("/api/projects") && method === "GET") {
+        return jsonResponse(200, [{ id: "proj-1", name: "Vellum Assistant" }]);
+      }
+      if (url.endsWith("/regenerate-secret")) {
+        return jsonResponse(200, { projectSecret: "secret-rotated" });
+      }
+      return jsonResponse(404, { error: "unexpected" });
+    };
+
+    const store = async (values: {
+      photon_project_id: string;
+      photon_project_secret: string;
+    }) => {
+      storeAttempts += 1;
+      if (storeAttempts === 1) {
+        throw new Error("refusing to store an inline secret");
+      }
+      stored.push(values);
+    };
+
+    await expect(
+      finishPhotonConnect({
+        storageDir: dir,
+        isConnected: async () => false,
+        sleep: async () => {},
+        store,
+        fetch: fetchImpl,
+      }),
+    ).rejects.toThrow(/inline secret/);
+
+    expect(polls).toBe(1);
+    const pending = JSON.parse(
+      readFileSync(join(dir, "photon-device-login.json"), "utf8"),
+    ) as { accessToken?: string };
+    expect(pending.accessToken).toBe("tok-1");
+
+    const restarted = await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      now: () => 5_000,
+      fetch: fetchImpl,
+    });
+    expect(restarted).toEqual({
+      alreadyConnected: false,
+      alreadyApproved: true,
+    });
+    expect(deviceCodes).toBe(0);
+
+    const done = await finishPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      sleep: async () => {},
+      store,
+      fetch: fetchImpl,
+    });
+
+    expect(polls).toBe(1);
+    expect(done).toEqual({
+      alreadyConnected: false,
+      projectId: "proj-1",
+      projectName: "Vellum Assistant",
+      created: false,
+    });
+    expect(stored).toEqual([
+      {
+        photon_project_id: "proj-1",
+        photon_project_secret: "secret-rotated",
+      },
+    ]);
   });
 });

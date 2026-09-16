@@ -55,8 +55,12 @@ mock.module("node:child_process", () => ({
   },
 }));
 
-const { readCredentialStatus, storeCredentials, CredentialWriteError } =
-  await import("../app-credentials.ts");
+const {
+  readCredentialStatus,
+  storeCredentials,
+  storeSecret,
+  CredentialWriteError,
+} = await import("../app-credentials.ts");
 
 beforeEach(() => {
   execCalls = [];
@@ -74,8 +78,9 @@ describe("readCredentialStatus", () => {
     // other provider's state without a second round trip.
     const status = await readCredentialStatus();
 
-    expect(Object.keys(status).sort()).toEqual(["comms", "photon"]);
+    expect(Object.keys(status).sort()).toEqual(["comms", "linq", "photon"]);
     expect(status.comms?.map((f) => f.field)).toEqual(["api_key"]);
+    expect(status.linq?.map((f) => f.field)).toEqual(["linq_api_key"]);
     expect(status.photon?.map((f) => f.field)).toEqual([
       "photon_project_id",
       "photon_project_secret",
@@ -178,6 +183,39 @@ describe("storeCredentials", () => {
     await expect(storeCredentials("comms", {})).rejects.toThrow(/no credential/);
   });
 
+  test("inserts --generated before the value when the secret is machine-obtained", async () => {
+    await storeCredentials(
+      "photon",
+      {
+        photon_project_id: "proj_1",
+        photon_project_secret: "shh",
+      },
+      { generated: true },
+    );
+
+    expect(execCalls).toHaveLength(2);
+    expect(execCalls[0]?.args).toEqual([
+      "credentials",
+      "set",
+      "--service",
+      "imessage",
+      "--field",
+      "photon_project_id",
+      "--generated",
+      "proj_1",
+    ]);
+    expect(execCalls[1]?.args).toEqual([
+      "credentials",
+      "set",
+      "--service",
+      "imessage",
+      "--field",
+      "photon_project_secret",
+      "--generated",
+      "shh",
+    ]);
+  });
+
   test("a CLI failure names the field and quotes the reason", async () => {
     // "command failed with exit code 1" does not say which of two Photon
     // fields did not take.
@@ -186,5 +224,23 @@ describe("storeCredentials", () => {
     await expect(
       storeCredentials("photon", { photon_project_id: "proj_1" }),
     ).rejects.toThrow(/imessage:photon_project_id.*unknown option/s);
+  });
+});
+
+describe("storeSecret", () => {
+  test("always marks the value as generated", async () => {
+    await storeSecret("photon_webhook_secret", "whsec_1");
+
+    expect(execCalls).toHaveLength(1);
+    expect(execCalls[0]?.args).toEqual([
+      "credentials",
+      "set",
+      "--service",
+      "imessage",
+      "--field",
+      "photon_webhook_secret",
+      "--generated",
+      "whsec_1",
+    ]);
   });
 });

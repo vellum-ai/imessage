@@ -79,17 +79,27 @@ export async function readCredentialStatus(): Promise<CredentialStatus> {
   return status;
 }
 
+/** Options for {@link storeCredentials} and {@link writeCredential}. */
+export interface StoreCredentialsOptions {
+  /**
+   * Pass `--generated` so the CLI accepts a machine-obtained value from an
+   * agent shell. Settings-app and user-typed fields omit this.
+   */
+  generated?: boolean;
+}
+
 /**
  * Store one or more of a provider's credential fields.
  *
  * Unknown field names are rejected rather than stored: the credential service
  * is shared across providers, and a typo would otherwise write a value nothing
  * ever reads and report success. Empty values are rejected for the same
- * reason — "saved" must mean the field now resolves.
+ * reason: "saved" must mean the field now resolves.
  */
 export async function storeCredentials(
   provider: ProviderId,
   values: Record<string, string>,
+  opts: StoreCredentialsOptions = {},
 ): Promise<void> {
   const allowed = new Map(
     PROVIDER_CREDENTIALS[provider].map((spec) => [spec.field, spec]),
@@ -114,7 +124,7 @@ export async function storeCredentials(
   }
 
   for (const [field, value] of entries) {
-    await writeCredential(field, value.trim());
+    await writeCredential(field, value.trim(), opts);
   }
 }
 
@@ -164,9 +174,11 @@ export async function readSecret(field: string): Promise<SecretRead> {
  * Store a secret this plugin generated or was issued, rather than one a user
  * typed.
  *
- * Deliberately not routed through {@link storeCredentials}: that validates
- * against `PROVIDER_CREDENTIALS`, which is the settings app's field list, and
- * a webhook secret must never appear there.
+ * Always passes `--generated` so the CLI accepts the machine-obtained value
+ * from an agent shell. Deliberately not routed through
+ * {@link storeCredentials}: that validates against `PROVIDER_CREDENTIALS`,
+ * which is the settings app's field list, and a webhook secret must never
+ * appear there.
  */
 export async function storeSecret(
   field: string,
@@ -175,7 +187,7 @@ export async function storeSecret(
   if (value.trim().length === 0) {
     throw new CredentialWriteError(`refusing to store an empty ${field}`);
   }
-  await writeCredential(field, value.trim());
+  await writeCredential(field, value.trim(), { generated: true });
 }
 
 /**
@@ -185,11 +197,15 @@ export async function storeSecret(
  * "command failed with exit code 1" tells a user nothing about which of two
  * Photon fields did not take.
  */
-async function writeCredential(field: string, value: string): Promise<void> {
+async function writeCredential(
+  field: string,
+  value: string,
+  opts: StoreCredentialsOptions = {},
+): Promise<void> {
   try {
     // Promisified per call rather than once at module load: binding it at load
     // captures whatever `execFile` was then, which makes the behaviour depend
-    // on import order — and makes a test that swaps the module out silently
+    // on import order, and makes a test that swaps the module out silently
     // exercise the real CLI.
     await promisify(execFile)(
       "assistant",
@@ -200,6 +216,7 @@ async function writeCredential(field: string, value: string): Promise<void> {
         CREDENTIAL_SERVICE,
         "--field",
         field,
+        ...(opts.generated ? ["--generated"] : []),
         value,
       ],
       { timeout: CLI_TIMEOUT_MS },

@@ -99,6 +99,17 @@ describe("formatPhotonConnectStart", () => {
     expect(message).not.toContain("connect.ts --finish");
   });
 
+  test("says so when Photon already approved and store has not finished", () => {
+    expect(
+      formatPhotonConnectStart({
+        alreadyConnected: false,
+        alreadyApproved: true,
+        userCode: "ABCD-1234",
+        verificationUri: "https://app.photon.codes/sign-in/device",
+      }),
+    ).toContain("Run connect.ts --finish");
+  });
+
   test("says so when Photon is already connected", () => {
     expect(formatPhotonConnectStart({ alreadyConnected: true })).toContain(
       "Photon is already connected",
@@ -209,6 +220,119 @@ describe("finishPhotonConnect", () => {
     expect(done.created).toBe(true);
     expect(done.projectId).toBe("proj-new");
     expect(stored[0]?.photon_project_secret).toBe("secret-new");
+  });
+
+  test("keeps the access token so a store failure does not require a new approval", async () => {
+    await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      fetch: async () =>
+        jsonResponse(200, {
+          device_code: "dev-1",
+          user_code: "ABCD-1234",
+          verification_uri: "https://app.photon.codes/sign-in/device",
+          expires_in: 600,
+          interval: 5,
+        }),
+    });
+
+    let polls = 0;
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/api/auth/device/token")) {
+        polls += 1;
+        return jsonResponse(200, { access_token: "tok-1" });
+      }
+      if (url.endsWith("/api/projects") && method === "GET") {
+        return jsonResponse(200, [{ id: "proj-1", name: "Vellum Assistant" }]);
+      }
+      if (url.endsWith("/regenerate-secret")) {
+        return jsonResponse(200, { projectSecret: "secret-rotated" });
+      }
+      return jsonResponse(404, { error: "unexpected" });
+    };
+
+    await expect(
+      finishPhotonConnect({
+        storageDir: dir,
+        isConnected: async () => false,
+        sleep: async () => {},
+        store: async () => {
+          throw new Error("vault refused");
+        },
+        fetch,
+      }),
+    ).rejects.toThrow(/vault refused/);
+    expect(polls).toBe(1);
+
+    const stored: Record<string, string>[] = [];
+    await finishPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      sleep: async () => {},
+      store: async (values) => {
+        stored.push(values);
+      },
+      fetch,
+    });
+    expect(polls).toBe(1);
+    expect(stored[0]?.photon_project_secret).toBe("secret-rotated");
+  });
+
+  test("reuses an approved login instead of minting a new device code", async () => {
+    await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      fetch: async () =>
+        jsonResponse(200, {
+          device_code: "dev-1",
+          user_code: "ABCD-1234",
+          verification_uri: "https://app.photon.codes/sign-in/device",
+          expires_in: 600,
+          interval: 5,
+        }),
+    });
+
+    await expect(
+      finishPhotonConnect({
+        storageDir: dir,
+        isConnected: async () => false,
+        sleep: async () => {},
+        store: async () => {
+          throw new Error("vault refused");
+        },
+        fetch: async (input, init) => {
+          const url = String(input);
+          const method = init?.method ?? "GET";
+          if (url.endsWith("/api/auth/device/token")) {
+            return jsonResponse(200, { access_token: "tok-1" });
+          }
+          if (url.endsWith("/api/projects") && method === "GET") {
+            return jsonResponse(200, [{ id: "proj-1", name: "Vellum Assistant" }]);
+          }
+          if (url.endsWith("/regenerate-secret")) {
+            return jsonResponse(200, { projectSecret: "secret-rotated" });
+          }
+          return jsonResponse(404, { error: "unexpected" });
+        },
+      }),
+    ).rejects.toThrow(/vault refused/);
+
+    let minted = 0;
+    const started = await startPhotonConnect({
+      storageDir: dir,
+      isConnected: async () => false,
+      fetch: async () => {
+        minted += 1;
+        throw new Error("dashboard should not mint a new code");
+      },
+    });
+    expect(minted).toBe(0);
+    expect(started.alreadyApproved).toBe(true);
+    expect(formatPhotonConnectStart(started)).toContain(
+      "Do not send a new approval URL",
+    );
   });
 
   test("refuses finish when start has not run", async () => {

@@ -40,12 +40,16 @@ const PendingSchema = z.object({
   verificationUriComplete: z.string().min(1).optional(),
   expiresAt: z.number().int().positive(),
   interval: z.number().int().positive(),
+  // Device codes are single-use. After poll succeeds, keep the access token
+  // so a later store retry does not ask the user to approve again.
+  accessToken: z.string().min(1).optional(),
 });
 
 export type PendingPhotonConnect = z.infer<typeof PendingSchema>;
 
 export interface PhotonConnectStart {
   alreadyConnected: boolean;
+  alreadyApproved?: boolean;
   userCode?: string;
   verificationUri?: string;
   verificationUriComplete?: string;
@@ -76,14 +80,23 @@ function pendingPath(storageDir: string): string {
   return join(storageDir, PENDING_FILENAME);
 }
 
+function persistPending(
+  storageDir: string,
+  pending: PendingPhotonConnect,
+): void {
+  const path = pendingPath(storageDir);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(pending, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+}
+
 function writePending(
   storageDir: string,
   challenge: DeviceCodeChallenge,
   now: () => number,
 ): void {
-  const path = pendingPath(storageDir);
-  mkdirSync(dirname(path), { recursive: true });
-  const pending: PendingPhotonConnect = {
+  persistPending(storageDir, {
     deviceCode: challenge.deviceCode,
     userCode: challenge.userCode,
     verificationUri: challenge.verificationUri,
@@ -92,10 +105,20 @@ function writePending(
       : {}),
     expiresAt: now() + challenge.expiresIn * 1000,
     interval: challenge.interval,
-  };
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(pending, null, 2)}\n`, "utf8");
-  renameSync(tmp, path);
+  });
+}
+
+function tryReadPending(storageDir: string): PendingPhotonConnect | undefined {
+  const path = pendingPath(storageDir);
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  try {
+    const parsed = PendingSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readPending(storageDir: string): PendingPhotonConnect {
@@ -156,6 +179,24 @@ export async function startPhotonConnect(
   }
 
   const now = opts.now ?? Date.now;
+  const existing = tryReadPending(storageDir);
+  if (
+    !opts.force &&
+    existing?.accessToken &&
+    existing.expiresAt > now()
+  ) {
+    return {
+      alreadyConnected: false,
+      alreadyApproved: true,
+      userCode: existing.userCode,
+      verificationUri: existing.verificationUri,
+      ...(existing.verificationUriComplete
+        ? { verificationUriComplete: existing.verificationUriComplete }
+        : {}),
+      expiresIn: Math.max(1, Math.floor((existing.expiresAt - now()) / 1000)),
+    };
+  }
+
   const challenge = await dashboardOf(opts).requestDeviceCode();
   writePending(storageDir, challenge, now);
   return {
@@ -186,16 +227,25 @@ export async function finishPhotonConnect(
   const now = opts.now ?? Date.now;
   const remainingSec = Math.max(1, Math.floor((pending.expiresAt - now()) / 1000));
   const dashboard = dashboardOf(opts);
-  const token = await dashboard.pollForToken({
-    deviceCode: pending.deviceCode,
-    userCode: pending.userCode,
-    verificationUri: pending.verificationUri,
-    ...(pending.verificationUriComplete
-      ? { verificationUriComplete: pending.verificationUriComplete }
-      : {}),
-    expiresIn: remainingSec,
-    interval: pending.interval,
-  });
+  let token = pending.accessToken;
+  if (!token) {
+    try {
+      token = await dashboard.pollForToken({
+        deviceCode: pending.deviceCode,
+        userCode: pending.userCode,
+        verificationUri: pending.verificationUri,
+        ...(pending.verificationUriComplete
+          ? { verificationUriComplete: pending.verificationUriComplete }
+          : {}),
+        expiresIn: remainingSec,
+        interval: pending.interval,
+      });
+    } catch (err) {
+      clearPending(storageDir);
+      throw err;
+    }
+    persistPending(storageDir, { ...pending, accessToken: token });
+  }
   const projectName = opts.projectName ?? DEFAULT_PHOTON_PROJECT_NAME;
   const existing = await dashboard.findProjectByName(token, projectName);
   const project =
@@ -206,7 +256,7 @@ export async function finishPhotonConnect(
     ((values: {
       photon_project_id: string;
       photon_project_secret: string;
-    }) => storeCredentials("photon", values));
+    }) => storeCredentials("photon", values, { generated: true }));
   await store({
     photon_project_id: project.id,
     photon_project_secret: secret,
@@ -232,6 +282,9 @@ export function photonApprovalUrl(started: PhotonConnectStart): string | undefin
 export function formatPhotonConnectStart(started: PhotonConnectStart): string {
   if (started.alreadyConnected) {
     return "Photon is already connected. Pass --force to reconnect and rotate the project secret.";
+  }
+  if (started.alreadyApproved) {
+    return "Photon already approved this login. Run connect.ts --finish. Do not send a new approval URL.";
   }
   const url = photonApprovalUrl(started);
   if (!url || !started.userCode) {

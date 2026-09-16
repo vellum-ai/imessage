@@ -55,7 +55,7 @@ mock.module("node:child_process", () => ({
   },
 }));
 
-const { readCredentialStatus, storeCredentials, CredentialWriteError } =
+const { readCredentialStatus, storeCredentials, storeSecret, CredentialWriteError } =
   await import("../app-credentials.ts");
 
 beforeEach(() => {
@@ -125,6 +125,25 @@ describe("storeCredentials", () => {
     ]);
   });
 
+  test("marks API-issued values so the agent-shell guard will store them", async () => {
+    await storeCredentials(
+      "photon",
+      { photon_project_id: "proj_1" },
+      { generated: true },
+    );
+
+    expect(execCalls[0]?.args).toEqual([
+      "credentials",
+      "set",
+      "--service",
+      "imessage",
+      "--field",
+      "photon_project_id",
+      "--generated",
+      "proj_1",
+    ]);
+  });
+
   test("writes each of a provider's fields", async () => {
     await storeCredentials("photon", {
       photon_project_id: "proj_1",
@@ -186,5 +205,22 @@ describe("storeCredentials", () => {
     await expect(
       storeCredentials("photon", { photon_project_id: "proj_1" }),
     ).rejects.toThrow(/imessage:photon_project_id.*unknown option/s);
+  });
+});
+
+describe("storeSecret", () => {
+  test("marks webhook secrets as API-issued", async () => {
+    await storeSecret("photon_webhook_secret", "whsec_1");
+
+    expect(execCalls[0]?.args).toEqual([
+      "credentials",
+      "set",
+      "--service",
+      "imessage",
+      "--field",
+      "photon_webhook_secret",
+      "--generated",
+      "whsec_1",
+    ]);
   });
 });

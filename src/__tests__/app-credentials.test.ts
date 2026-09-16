@@ -74,7 +74,7 @@ describe("readCredentialStatus", () => {
     // other provider's state without a second round trip.
     const status = await readCredentialStatus();
 
-    expect(Object.keys(status).sort()).toEqual(["comms", "photon"]);
+    expect(Object.keys(status).sort()).toEqual(["comms", "linq", "photon"]);
     expect(status.comms?.map((f) => f.field)).toEqual(["api_key"]);
     expect(status.photon?.map((f) => f.field)).toEqual([
       "photon_project_id",

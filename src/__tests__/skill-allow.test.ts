@@ -26,7 +26,7 @@ mock.module("@vellumai/plugin-api", () => ({
   }),
 }));
 
-const { allowContactPhones, allowRecipient } = await import(
+const { allowContactPhones, allowRecipient, formatAllowRecipient } = await import(
   "../../skills/imessage-setup/scripts/allow-client.ts"
 );
 
@@ -55,7 +55,11 @@ function stubControlPlane(): void {
       };
       return Response.json({
         succeed: true,
-        data: { id: "usr_1", phoneNumber: body.phoneNumber },
+        data: {
+          id: "usr_1",
+          phoneNumber: body.phoneNumber,
+          assignedPhoneNumber: "+15550100",
+        },
       });
     }
     return Response.json({
@@ -82,7 +86,10 @@ describe("skill allow", () => {
     stubControlPlane();
     const result = await allowRecipient("+15551234567");
 
-    expect(result).toEqual({ phoneNumber: "+15551234567" });
+    expect(result).toEqual({
+      phoneNumber: "+15551234567",
+      assignedPhoneNumber: "+15550100",
+    });
     expect(pathsCalled()).toEqual([
       "/projects/proj_1/imessage/",
       "/projects/proj_1/users/",
@@ -168,7 +175,7 @@ describe("skill allow", () => {
       }),
     });
 
-    expect(result.allowed).toEqual(["+15551234567"]);
+    expect(result.allowed).toEqual([{ phoneNumber: "+15551234567" }]);
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]?.phone).toBe("+15550000000");
     expect(result.failed[0]?.reason).toContain("maxSharedUsers");
@@ -181,5 +188,27 @@ describe("skill allow", () => {
     });
     expect(result).toEqual({ allowed: [], failed: [] });
     expect(pathsCalled()).toEqual([]);
+  });
+});
+
+describe("formatAllowRecipient", () => {
+  test("prints the line they should text first", () => {
+    expect(
+      formatAllowRecipient({
+        phoneNumber: "+15551234567",
+        assignedPhoneNumber: "+15550100",
+      }),
+    ).toBe(
+      [
+        "Allowed +15551234567 on this Photon project.",
+        "Ask them to text +15550100 from that number before any outbound. Photon's message plane refuses the first send to a number it has not heard from.",
+      ].join("\n"),
+    );
+  });
+
+  test("omits the line when Photon did not return one", () => {
+    expect(formatAllowRecipient({ phoneNumber: "+15551234567" })).toBe(
+      "Allowed +15551234567 on this Photon project.",
+    );
   });
 });

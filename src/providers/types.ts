@@ -210,16 +210,24 @@ export interface MessagingProvider {
    * Make a handle messageable without sending anything.
    *
    * Photon will only message people the project knows. A cold send registers
-   * the recipient on the way out, but a setup probe — and any later outbound
-   * to a number that has never texted the line — still fails with "Target not
+   * the recipient on the way out, but a setup probe, and any later outbound
+   * to a number that has never texted the line, still fails with "Target not
    * allowed for this project" if this step was skipped. Webhook registration
    * and the setup skill both call it so a first send is not the first time
    * Photon hears the number.
    *
+   * On a Photon shared line, registering the user is not enough for the first
+   * outbound. The message plane still refuses until that number has texted
+   * the line. `assignedPhoneNumber` is the line they should text, when Photon
+   * returned one.
+   *
    * Optional because a provider that does not restrict recipients has
    * nothing to do here. Comms omits it.
    */
-  allowRecipient?(handle: string): Promise<{ phoneNumber: string }>;
+  allowRecipient?(handle: string): Promise<{
+    phoneNumber: string;
+    assignedPhoneNumber?: string;
+  }>;
 
   /**
    * Read one webhook delivery and say what it is.

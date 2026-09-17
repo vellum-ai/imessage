@@ -71,13 +71,20 @@ bun skills/imessage-setup/scripts/allow.ts --to "+15551234567"
 Webhook registration also allows every phone number already on the assistant's
 contacts. If the setup check is to a number that is not a contact, or the
 contacts list was empty at start, that automatic pass will not have included
-it — `--to` is the fix. `--contacts` re-runs the same pass by hand.
+it. `--to` is the fix. `--contacts` re-runs the same pass by hand.
 
 The plugin retries `POST /users/` only after a cold send is refused with this
-error, then retries the send. Seeing this after a successful `allow.ts` means
-the registration itself failed, or the plane refused for another reason. On a
-shared project the usual cause is the project's shared-user cap; Photon's own
-message says which.
+error, then retries the send. Seeing this after a successful `allow.ts`, when
+they have not yet texted the line, is the first-text rule below, not a failed
+registration. On a shared project the other usual cause is the project's
+shared-user cap; Photon's own message says which.
+
+**Photon setup-check send is refused after a successful allow.ts.** Photon's
+message plane will not let the line place the first call to a number it has
+not heard from. `allow.ts` registers them as a project user. That is not
+enough for the first outbound. Ask them to text the line `allow.ts` printed.
+Do not retry `send.ts`. Do not rotate credentials. Do not treat this as a
+missed allow.
 
 **403 from Comms on send** — the key lacks `comms_send`. Mint a new one; scopes
 cannot be added.
